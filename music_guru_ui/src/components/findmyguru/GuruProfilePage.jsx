@@ -30,14 +30,9 @@ import {
 
 const GuruProfilePage = () => {
   const { slug } = useParams();
-  const { academies, reviews, addReview, features, currentRole } = useGuru();
+  const { academies, reviews, addReview, currentRole, checkSocialMediaAccess, checkSendInquiryAccess, checkGoogleMapAccess, isGlobalFeatureActive } = useGuru();
 
-  const sendEnquiryFeature = (features || []).find(
-    (f) => (f.name || '').toLowerCase().trim() === 'send enquiry' || f.id === 'feat-1'
-  );
-  const isEnquiryActive = sendEnquiryFeature
-    ? (sendEnquiryFeature.is_active !== false && sendEnquiryFeature.isActive !== false)
-    : true;
+  const isEnquiryActive = isGlobalFeatureActive('Send Inquiry');
   const showSendEnquiryButton = isEnquiryActive || currentRole === 'SUPER_ADMIN';
 
   const [isInquiryModalOpen, setIsInquiryModalOpen] = useState(false);
@@ -75,6 +70,10 @@ const GuruProfilePage = () => {
     academies[0] || {};
 
   const academy = liveAcademy || fallbackAcademy;
+
+  const hasSocialAccess = checkSocialMediaAccess ? checkSocialMediaAccess(academy) : (academy.hasSocialMedia !== false);
+  const hasInquiryAccess = checkSendInquiryAccess ? checkSendInquiryAccess(academy) : true;
+  const hasGoogleMapAccess = checkGoogleMapAccess ? checkGoogleMapAccess(academy) : (academy.hasGoogleMap !== false);
 
   const getSocialLinks = (acad) => {
     if (!acad) return {};
@@ -261,15 +260,17 @@ const GuruProfilePage = () => {
           <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-md space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-extrabold text-gray-900 border-l-4 border-rose-600 pl-3">Google Map Location</h2>
-              <a
-                href={academy.mapUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs font-semibold text-rose-600 hover:underline flex items-center"
-              >
-                <span>Open Directions</span>
-                <ExternalLink className="w-3.5 h-3.5 ml-1" />
-              </a>
+              {hasGoogleMapAccess && (
+                <a
+                  href={academy.mapUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-semibold text-rose-600 hover:underline flex items-center"
+                >
+                  <span>Open Directions</span>
+                  <ExternalLink className="w-3.5 h-3.5 ml-1" />
+                </a>
+              )}
             </div>
 
             <p className="text-xs text-gray-600 flex flex-wrap items-center gap-2">
@@ -281,28 +282,42 @@ const GuruProfilePage = () => {
               )}
             </p>
 
-            <div className="w-full h-64 bg-slate-200 rounded-2xl overflow-hidden relative border border-gray-300 shadow-inner flex items-center justify-center">
-              <img
-                src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&w=1000&q=80"
-                alt="Map Background"
-                className="w-full h-full object-cover opacity-60"
-              />
-              <div className="absolute inset-0 bg-slate-900/40" />
-
-              <div className="absolute bg-white p-4 rounded-2xl shadow-2xl border border-gray-200 text-center max-w-xs space-y-2">
-                <MapPin className="w-8 h-8 text-rose-600 mx-auto animate-bounce" />
-                <h4 className="font-bold text-gray-900 text-sm">{academy.academyName}</h4>
-                <p className="text-[11px] text-gray-600 line-clamp-2">{locationDisplay}</p>
-                <a
-                  href={academy.mapUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-block bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow"
-                >
-                  View Live Map Pin
-                </a>
+            {!hasGoogleMapAccess ? (
+              <div className="w-full h-56 bg-slate-100 rounded-2xl border border-slate-200 p-6 flex flex-col items-center justify-center text-center space-y-3 relative overflow-hidden">
+                <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center shadow-inner">
+                  <MapPin className="w-6 h-6" />
+                </div>
+                <div className="space-y-1 max-w-sm">
+                  <h4 className="font-extrabold text-slate-900 text-sm">Google Map Pin Locked</h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Interactive Google Map pin is disabled on {academy.subscriptionPlanName || 'Free Plan'}. Upgrade to <strong>Google Map Location Plan</strong> (₹999/yr) to showcase your exact live map directions.
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="w-full h-64 bg-slate-200 rounded-2xl overflow-hidden relative border border-gray-300 shadow-inner flex items-center justify-center">
+                <img
+                  src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&w=1000&q=80"
+                  alt="Map Background"
+                  className="w-full h-full object-cover opacity-60"
+                />
+                <div className="absolute inset-0 bg-slate-900/40" />
+
+                <div className="absolute bg-white p-4 rounded-2xl shadow-2xl border border-gray-200 text-center max-w-xs space-y-2">
+                  <MapPin className="w-8 h-8 text-rose-600 mx-auto animate-bounce" />
+                  <h4 className="font-bold text-gray-900 text-sm">{academy.academyName}</h4>
+                  <p className="text-[11px] text-gray-600 line-clamp-2">{locationDisplay}</p>
+                  <a
+                    href={academy.mapUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow"
+                  >
+                    View Live Map Pin
+                  </a>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-md space-y-6">
@@ -352,99 +367,122 @@ const GuruProfilePage = () => {
             </div>
 
             {showSendEnquiryButton && (
-              <button
-                onClick={() => setIsInquiryModalOpen(true)}
-                className="w-full bg-gradient-to-r from-rose-600 via-purple-600 to-indigo-700 hover:from-rose-700 hover:to-indigo-800 text-white font-extrabold text-base py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center space-x-2 active:scale-98"
-              >
-                <Send className="w-5 h-5" />
-                <span>Send Inquiry to Guru</span>
-              </button>
-            )}
-
-            {social.whatsapp && (
-              <div className="space-y-3 pt-4 border-t border-gray-100 text-xs text-gray-700">
-                <h4 className="font-bold text-gray-900 text-xs uppercase tracking-wider">Direct Academy Contact</h4>
-                <a
-                  href={social.whatsapp.startsWith('http') ? social.whatsapp : `https://wa.me/${social.whatsapp.replace(/\D/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center space-x-3 bg-emerald-50 hover:bg-emerald-100 p-3 rounded-xl border border-emerald-200 text-emerald-900 transition-colors shadow-sm"
+              hasInquiryAccess ? (
+                <button
+                  onClick={() => setIsInquiryModalOpen(true)}
+                  className="w-full bg-gradient-to-r from-rose-600 via-purple-600 to-indigo-700 hover:from-rose-700 hover:to-indigo-800 text-white font-extrabold text-base py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center space-x-2 active:scale-98"
                 >
-                  <MessageCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div>
-                    <span className="text-[10px] text-emerald-700 font-bold block">WhatsApp Chat</span>
-                    <span className="font-bold text-xs">Message {academy.teacherName}</span>
+                  <Send className="w-5 h-5" />
+                  <span>Send Inquiry to Guru</span>
+                </button>
+              ) : (
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-center space-y-2 shadow-sm">
+                  <div className="flex items-center justify-center space-x-1.5 text-amber-800 font-bold text-xs">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Send Inquiry Disabled (Free / Basic Plan)</span>
                   </div>
-                </a>
-              </div>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">
+                    Direct student inquiries are not enabled on this academy's <strong>{academy.subscriptionPlanName || 'Free Plan'}</strong>. Upgrade to <strong>Send Inquiry Plan</strong> to receive direct student leads.
+                  </p>
+                </div>
+              )
             )}
 
-            {hasSocialLinks && (
-              <div className="pt-4 border-t border-gray-100 space-y-3">
-                <h4 className="font-bold text-gray-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                  <Share2 className="w-3.5 h-3.5 text-rose-500" />
-                  <span>Social Media & Online Profiles</span>
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {social.instagram && (
+            {hasSocialAccess ? (
+              (hasSocialLinks || social.whatsapp) && (
+                <div className="pt-4 border-t border-gray-100 space-y-3">
+                  <h4 className="font-bold text-gray-900 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    <Share2 className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Social Media & Online Profiles</span>
+                  </h4>
+                  {social.whatsapp && (
                     <a
-                      href={social.instagram.startsWith('http') ? social.instagram : `https://${social.instagram}`}
+                      href={social.whatsapp.startsWith('http') ? social.whatsapp : `https://wa.me/${social.whatsapp.replace(/\D/g, '')}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center px-3.5 py-2 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 hover:from-purple-700 hover:to-rose-600 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      className="flex items-center space-x-3 bg-emerald-50 hover:bg-emerald-100 p-3 rounded-xl border border-emerald-200 text-emerald-900 transition-colors shadow-sm mb-2"
                     >
-                      <Instagram className="w-4 h-4 mr-1.5 shrink-0" />
-                      <span>Instagram</span>
+                      <MessageCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <div>
+                        <span className="text-[10px] text-emerald-700 font-bold block">WhatsApp Chat</span>
+                        <span className="font-bold text-xs">Message {academy.teacherName}</span>
+                      </div>
                     </a>
                   )}
 
-                  {social.youtube && (
-                    <a
-                      href={social.youtube.startsWith('http') ? social.youtube : `https://${social.youtube}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <Youtube className="w-4 h-4 mr-1.5 shrink-0" />
-                      <span>YouTube</span>
-                    </a>
-                  )}
+                  <div className="flex flex-wrap gap-2">
+                    {social.instagram && (
+                      <a
+                        href={social.instagram.startsWith('http') ? social.instagram : `https://${social.instagram}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3.5 py-2 bg-gradient-to-r from-purple-600 via-pink-600 to-rose-500 hover:from-purple-700 hover:to-rose-600 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      >
+                        <Instagram className="w-4 h-4 mr-1.5 shrink-0" />
+                        <span>Instagram</span>
+                      </a>
+                    )}
 
-                  {social.facebook && (
-                    <a
-                      href={social.facebook.startsWith('http') ? social.facebook : `https://${social.facebook}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <Facebook className="w-4 h-4 mr-1.5 shrink-0" />
-                      <span>Facebook</span>
-                    </a>
-                  )}
+                    {social.youtube && (
+                      <a
+                        href={social.youtube.startsWith('http') ? social.youtube : `https://${social.youtube}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      >
+                        <Youtube className="w-4 h-4 mr-1.5 shrink-0" />
+                        <span>YouTube</span>
+                      </a>
+                    )}
 
-                  {social.website && (
-                    <a
-                      href={social.website.startsWith('http') ? social.website : `https://${social.website}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <Globe className="w-4 h-4 mr-1.5 shrink-0" />
-                      <span>Website</span>
-                    </a>
-                  )}
+                    {social.facebook && (
+                      <a
+                        href={social.facebook.startsWith('http') ? social.facebook : `https://${social.facebook}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      >
+                        <Facebook className="w-4 h-4 mr-1.5 shrink-0" />
+                        <span>Facebook</span>
+                      </a>
+                    )}
 
-                  {social.linkedin && (
-                    <a
-                      href={social.linkedin.startsWith('http') ? social.linkedin : `https://${social.linkedin}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
-                    >
-                      <Linkedin className="w-4 h-4 mr-1.5 shrink-0" />
-                      <span>LinkedIn</span>
-                    </a>
-                  )}
+                    {social.website && (
+                      <a
+                        href={social.website.startsWith('http') ? social.website : `https://${social.website}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      >
+                        <Globe className="w-4 h-4 mr-1.5 shrink-0" />
+                        <span>Website</span>
+                      </a>
+                    )}
+
+                    {social.linkedin && (
+                      <a
+                        href={social.linkedin.startsWith('http') ? social.linkedin : `https://${social.linkedin}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded-xl shadow-sm hover:shadow-md transition-all active:scale-95"
+                      >
+                        <Linkedin className="w-4 h-4 mr-1.5 shrink-0" />
+                        <span>LinkedIn</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )
+            ) : (
+              <div className="pt-4 border-t border-gray-100">
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-center space-y-1.5">
+                  <div className="flex items-center justify-center space-x-1.5 text-slate-700 font-bold text-xs">
+                    <Share2 className="w-4 h-4 text-slate-500 shrink-0" />
+                    <span>Social Media Links Locked</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 leading-relaxed">
+                    Social links & WhatsApp chat are locked on <strong>{academy.subscriptionPlanName || 'Free Plan'}</strong>. Upgrade to <strong>Social Media Plan</strong> or <strong>Social Media & Google Map Plan</strong> to unlock.
+                  </p>
                 </div>
               </div>
             )}

@@ -101,6 +101,46 @@ export const guruService = {
     }
   },
 
+  fetchGlobalFeatures: async () => {
+    try {
+      const response = await guruApi.getGlobalFeatures();
+      return response.data || response || [];
+    } catch (err) {
+      console.warn('Failed to fetch global features from backend:', err);
+      return [];
+    }
+  },
+
+  createGlobalFeature: async (featureData) => {
+    try {
+      const response = await guruApi.createGlobalFeature(featureData);
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to create global feature on backend:', err);
+      return null;
+    }
+  },
+
+  updateGlobalFeature: async (id, featureData) => {
+    try {
+      const response = await guruApi.updateGlobalFeature(id, featureData);
+      return response.data || response;
+    } catch (err) {
+      console.warn(`Failed to update global feature for id ${id}:`, err);
+      return null;
+    }
+  },
+
+  deleteGlobalFeature: async (id) => {
+    try {
+      const response = await guruApi.deleteGlobalFeature(id);
+      return response.data || response;
+    } catch (err) {
+      console.warn(`Failed to delete global feature for id ${id}:`, err);
+      return null;
+    }
+  },
+
   fetchPlans: async () => {
     try {
       const response = await guruApi.getPlans();

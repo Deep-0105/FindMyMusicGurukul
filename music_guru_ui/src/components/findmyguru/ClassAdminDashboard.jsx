@@ -27,7 +27,11 @@ import {
   AlertTriangle,
   Clock,
   AlertCircle,
-  Link
+  Link,
+  Lock,
+  Unlock,
+  Globe,
+  Send
 } from 'lucide-react';
 
 const parseBatchTypes = (arr) => {
@@ -98,10 +102,25 @@ const isValidUrl = (urlStr) => {
 };
 
 const ClassAdminDashboard = () => {
-  const { academies, activeAcademyId, setActiveAcademyId, updateAcademyProfile, inquiries, updateInquiryStatus, skills, currentUser } = useGuru();
+  const {
+    academies,
+    activeAcademyId,
+    setActiveAcademyId,
+    updateAcademyProfile,
+    inquiries,
+    updateInquiryStatus,
+    skills,
+    currentUser,
+    plans,
+    updateAcademySubscription,
+    checkSocialMediaAccess,
+    checkSendInquiryAccess,
+    checkGoogleMapAccess
+  } = useGuru();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState('inquiries');
+  const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
 
   const userEmail = (currentUser?.email || '').toLowerCase().trim();
   const userPhone = (currentUser?.phone || '').replace(/\D/g, '');
@@ -118,6 +137,10 @@ const ClassAdminDashboard = () => {
 
   const academy = userAcademy || academies.find((a) => a.id === activeAcademyId) || academies.find((a) => a.status === 'Pending') || academies[0] || {};
   const academyInquiries = inquiries.filter((inq) => inq.academyId === academy.id);
+
+  const hasSocialAccess = checkSocialMediaAccess ? checkSocialMediaAccess(academy) : true;
+  const hasInquiryAccess = checkSendInquiryAccess ? checkSendInquiryAccess(academy) : true;
+  const hasGoogleMapAccess = checkGoogleMapAccess ? checkGoogleMapAccess(academy) : true;
 
   const [isBatchDropdownOpen, setIsBatchDropdownOpen] = useState(false);
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
@@ -450,7 +473,7 @@ const ClassAdminDashboard = () => {
                   Status: {academy.status}
                 </span>
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                  Plan: {academy.subscriptionPlanName}
+                  Plan: {academy.subscriptionPlanName || 'Free Listing'} • Valid until {academy.subscriptionExpiry || academy.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
                 </span>
               </div>
               <h1 className="text-2xl font-black text-white mt-1">{academy.academyName}</h1>
@@ -604,15 +627,43 @@ const ClassAdminDashboard = () => {
             <p className="text-[11px] text-gray-400">Past 30 days discovery rate</p>
           </div>
 
-          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-2">
-            <div className="flex items-center justify-between text-gray-500 text-xs font-semibold uppercase tracking-wider">
-              <span>Active Subscription</span>
-              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+          <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm space-y-3 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">
+                <span>Active Plan</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-base font-black text-gray-900">{academy.subscriptionPlanName || 'Free Plan'}</span>
+                <button
+                  onClick={() => setIsUpgradeModalOpen(true)}
+                  className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg transition-colors"
+                >
+                  Change Plan
+                </button>
+              </div>
+              <div className="mt-1.5 flex flex-wrap gap-1 text-[11px]">
+                <span className="px-2 py-0.5 rounded font-bold border bg-purple-50 text-purple-700 border-purple-200 flex items-center gap-1">
+                  📩 Inquiries: Included
+                </span>
+                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${
+                  hasSocialAccess ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'
+                }`}>
+                  🌐 Social: {hasSocialAccess ? 'Included' : 'Locked'}
+                </span>
+                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${
+                  hasGoogleMapAccess ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-100 text-gray-500 border-gray-200'
+                }`}>
+                  📍 Map Pin: {hasGoogleMapAccess ? 'Included' : 'Locked'}
+                </span>
+              </div>
             </div>
-            <div className="flex items-baseline space-x-2">
-              <span className="text-lg font-bold text-gray-900">{academy.subscriptionPlanName}</span>
+            <div className="pt-2 border-t border-gray-100">
+              <span className="inline-flex items-center space-x-1.5 bg-slate-50 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-slate-200">
+                <Clock className="w-3 h-3 text-slate-500" />
+                <span>Valid until: {academy.subscriptionExpiry || academy.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}</span>
+              </span>
             </div>
-            <p className="text-[11px] text-emerald-600 font-medium">Valid until {academy.subscriptionExpiry}</p>
           </div>
         </div>
 
@@ -1237,9 +1288,17 @@ const ClassAdminDashboard = () => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Google Maps Pin URL</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider">Google Maps Pin URL</label>
+                    {!hasGoogleMapAccess && (
+                      <span className="text-[10px] font-extrabold text-amber-800 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Locked on {academy.subscriptionPlanName || 'Free Plan'}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="text"
+                    disabled={!hasGoogleMapAccess}
                     placeholder="https://maps.google.com/?q=... or https://maps.app.goo.gl/..."
                     value={profileForm.mapUrl || ''}
                     onChange={(e) => {
@@ -1248,11 +1307,23 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, mapUrl: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-xs focus:bg-white focus:ring-2 ${
-                      validationErrors.mapUrl ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs focus:ring-2 ${
+                      !hasGoogleMapAccess ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-300' : validationErrors.mapUrl ? 'bg-gray-50 border-red-500 focus:ring-red-500' : 'bg-gray-50 border-gray-300 focus:ring-emerald-500'
                     }`}
                   />
-                  {validationErrors.mapUrl && (
+                  {!hasGoogleMapAccess && (
+                    <p className="text-amber-800 text-[11px] mt-1 flex items-center justify-between font-medium">
+                      <span>Upgrade to <strong>Google Map Location Plan</strong> (₹999/yr) to enable live map pins.</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsUpgradeModalOpen(true)}
+                        className="text-indigo-700 hover:underline font-bold text-[11px] ml-2"
+                      >
+                        Upgrade Plan
+                      </button>
+                    </p>
+                  )}
+                  {hasGoogleMapAccess && validationErrors.mapUrl && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.mapUrl}</p>
                   )}
                 </div>
@@ -1459,15 +1530,44 @@ const ClassAdminDashboard = () => {
 
             {/* Section 6: Social Media Links */}
             <div className="space-y-4 pt-4 border-t border-gray-100">
-              <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider border-l-4 border-indigo-500 pl-2.5">
-                6. Social Media & Online Profiles
-              </h4>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider border-l-4 border-indigo-500 pl-2.5 flex items-center gap-2">
+                  <span>6. Social Media & Online Profiles</span>
+                  {!hasSocialAccess && (
+                    <span className="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-2 py-0.5 rounded border border-amber-300 flex items-center gap-1">
+                      <Lock className="w-3 h-3" /> Locked on {academy.subscriptionPlanName || 'Free Plan'}
+                    </span>
+                  )}
+                </h4>
+                {!hasSocialAccess && (
+                  <button
+                    type="button"
+                    onClick={() => setIsUpgradeModalOpen(true)}
+                    className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-3 py-1 rounded-xl transition-colors self-start sm:self-auto"
+                  >
+                    Upgrade to Unlock Social Links
+                  </button>
+                )}
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+              {!hasSocialAccess && (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-3 text-amber-900 text-xs">
+                  <Lock className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold">Social Media Integration is Locked on {academy.subscriptionPlanName || 'Free Plan'}</p>
+                    <p className="text-amber-800 text-[11px] leading-relaxed">
+                      Upgrade to the <strong>Social Media Plan</strong> (₹499/yr) or <strong>Social Media & Google Map Plan</strong> (₹1499/yr) to link your WhatsApp, Instagram, YouTube, Facebook, LinkedIn, and Website on your public listing page!
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className={`grid grid-cols-1 sm:grid-cols-3 gap-5 ${!hasSocialAccess ? 'opacity-60 pointer-events-none' : ''}`}>
                 <div>
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Website URL</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://myacademy.com"
                     value={profileForm.socialLinks?.website || ''}
                     onChange={(e) => handleSocialChange('website', e.target.value)}
@@ -1484,6 +1584,7 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp Chat Link</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://wa.me/919823044112"
                     value={profileForm.socialLinks?.whatsapp || ''}
                     onChange={(e) => handleSocialChange('whatsapp', e.target.value)}
@@ -1500,6 +1601,7 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Instagram Profile URL</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://instagram.com/..."
                     value={profileForm.socialLinks?.instagram || ''}
                     onChange={(e) => handleSocialChange('instagram', e.target.value)}
@@ -1516,6 +1618,7 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">YouTube Channel URL</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://youtube.com/..."
                     value={profileForm.socialLinks?.youtube || ''}
                     onChange={(e) => handleSocialChange('youtube', e.target.value)}
@@ -1532,6 +1635,7 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Facebook Page URL</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://facebook.com/..."
                     value={profileForm.socialLinks?.facebook || ''}
                     onChange={(e) => handleSocialChange('facebook', e.target.value)}
@@ -1548,6 +1652,7 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">LinkedIn Profile URL</label>
                   <input
                     type="text"
+                    disabled={!hasSocialAccess}
                     placeholder="https://linkedin.com/..."
                     value={profileForm.socialLinks?.linkedin || ''}
                     onChange={(e) => handleSocialChange('linkedin', e.target.value)}
@@ -1660,6 +1765,239 @@ const ClassAdminDashboard = () => {
           <div>
             <p className="font-extrabold text-sm leading-tight">Profile updated successfully!</p>
             <p className="text-[11px] text-emerald-100 mt-0.5">Your academy details are saved and live.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade Subscription Plan Modal */}
+      {isUpgradeModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl space-y-6 relative border border-gray-100 my-8">
+            <button
+              onClick={() => setIsUpgradeModalOpen(false)}
+              className="absolute top-5 right-5 text-gray-400 hover:text-gray-600 p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center space-y-2">
+              <span className="bg-emerald-100 text-emerald-800 text-xs font-extrabold px-3 py-1 rounded-full uppercase tracking-wider">
+                Select Subscription Tier
+              </span>
+              <h3 className="text-2xl font-black text-gray-900">Choose the Right Plan for {academy.academyName}</h3>
+              <p className="text-xs text-gray-500 max-w-lg mx-auto">
+                Unlock higher student engagement and lead generation with our simple subscription plans.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+              {/* Plan 1: Free Plan */}
+              {(() => {
+                const freePlanObj = plans.find((p) => p.name === 'Free Plan' || String(p.id) === '1' || String(p.id) === 'plan-1') || {
+                  id: 'plan-1',
+                  name: 'Free Plan',
+                  price: 0
+                };
+                const isCurrent = (academy.subscriptionPlanName || 'Free Plan').toLowerCase().includes('free');
+                return (
+                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all ${
+                    isCurrent ? 'border-gray-400 bg-slate-50 shadow-md' : 'border-gray-200 hover:border-gray-300 bg-white'
+                  }`}>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Tier 1</span>
+                        {isCurrent && (
+                          <span className="bg-gray-200 text-gray-800 text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
+                        )}
+                      </div>
+                      <h4 className="text-xl font-extrabold text-gray-900">Free Plan</h4>
+                      <div className="text-3xl font-black text-gray-900">
+                        ₹0 <span className="text-xs font-normal text-gray-500">/ year</span>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Basic directory listing and student lead inquiry forms.
+                      </p>
+                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-gray-100">
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Directory Listing & Search</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Photo & Media Gallery</span>
+                        </li>
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Instrument Mapping</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-semibold text-emerald-900">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>Send Inquiry Lead Form</span>
+                        </li>
+                        <li className="flex items-center gap-2 text-gray-400">
+                          <X className="w-4 h-4 text-gray-300 shrink-0" />
+                          <span className="line-through">Social Media Links</span>
+                        </li>
+                        <li className="flex items-center gap-2 text-gray-400">
+                          <X className="w-4 h-4 text-gray-300 shrink-0" />
+                          <span className="line-through">Google Map Location Pin</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        await updateAcademySubscription(academy.id, freePlanObj.id);
+                        setIsUpgradeModalOpen(false);
+                      }}
+                      disabled={isCurrent}
+                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
+                        isCurrent
+                          ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                          : 'bg-slate-800 hover:bg-slate-900 text-white shadow'
+                      }`}
+                    >
+                      {isCurrent ? 'Active Plan' : 'Select Free Plan'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Plan 2: Social Media Plan */}
+              {(() => {
+                const socialPlanObj = plans.find((p) => p.name === 'Social Media Plan' || String(p.id) === '2' || String(p.id) === 'plan-2') || {
+                  id: 'plan-2',
+                  name: 'Social Media Plan',
+                  price: 499
+                };
+                const isCurrent = (academy.subscriptionPlanName || '').toLowerCase().includes('social media');
+                return (
+                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all relative ${
+                    isCurrent ? 'border-indigo-600 bg-indigo-50/30 shadow-md' : 'border-indigo-200 hover:border-indigo-400 bg-white'
+                  }`}>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Tier 2</span>
+                        {isCurrent && (
+                          <span className="bg-indigo-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
+                        )}
+                      </div>
+                      <h4 className="text-xl font-extrabold text-gray-900">Social Media Plan</h4>
+                      <div className="text-3xl font-black text-indigo-900">
+                        ₹499 <span className="text-xs font-normal text-gray-500">/ year</span>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Free Plan features + WhatsApp, Instagram, YouTube, Facebook, LinkedIn & Website.
+                      </p>
+                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-indigo-100">
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Everything in Free Plan</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
+                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                          <span>WhatsApp & Phone Chat Link</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
+                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                          <span>Instagram, YouTube & Facebook</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
+                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+                          <span>Website & LinkedIn Links</span>
+                        </li>
+                        <li className="flex items-center gap-2 text-gray-400">
+                          <X className="w-4 h-4 text-gray-300 shrink-0" />
+                          <span className="line-through">Google Map Location Pin</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        await updateAcademySubscription(academy.id, socialPlanObj.id);
+                        setIsUpgradeModalOpen(false);
+                      }}
+                      disabled={isCurrent}
+                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
+                        isCurrent
+                          ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 cursor-not-allowed'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'
+                      }`}
+                    >
+                      {isCurrent ? 'Active Plan' : 'Activate Social Media Plan'}
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Plan 3: Google Map Location Plan */}
+              {(() => {
+                const mapPlanObj = plans.find((p) => p.name === 'Google Map Location Plan' || String(p.id) === '3' || String(p.id) === 'plan-3') || {
+                  id: 'plan-3',
+                  name: 'Google Map Location Plan',
+                  price: 999
+                };
+                const isCurrent = (academy.subscriptionPlanName || '').toLowerCase().includes('google map');
+                return (
+                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all relative ${
+                    isCurrent ? 'border-purple-600 bg-purple-50/30 shadow-md' : 'border-purple-300 hover:border-purple-500 bg-white ring-2 ring-purple-500/20'
+                  }`}>
+                    <span className="absolute -top-3 right-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow">
+                      MOST POPULAR
+                    </span>
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">Tier 3</span>
+                        {isCurrent && (
+                          <span className="bg-purple-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
+                        )}
+                      </div>
+                      <h4 className="text-xl font-extrabold text-gray-900">Google Map Location Plan</h4>
+                      <div className="text-3xl font-black text-purple-900">
+                        ₹999 <span className="text-xs font-normal text-gray-500">/ year</span>
+                      </div>
+                      <p className="text-xs text-gray-500 leading-relaxed">
+                        Full suite with interactive Google Map Location pin.
+                      </p>
+                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-purple-100">
+                        <li className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                          <span>Everything in Social Media Plan</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-bold text-purple-900">
+                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                          <span>Interactive Google Map Location Pin</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-bold text-purple-900">
+                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                          <span>Live Directions & GPS Link</span>
+                        </li>
+                        <li className="flex items-center gap-2 font-bold text-purple-900">
+                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
+                          <span>Priority Search Ranking</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <button
+                      onClick={async () => {
+                        await updateAcademySubscription(academy.id, mapPlanObj.id);
+                        setIsUpgradeModalOpen(false);
+                      }}
+                      disabled={isCurrent}
+                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
+                        isCurrent
+                          ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed'
+                          : 'bg-purple-600 hover:bg-purple-700 text-white shadow-md'
+                      }`}
+                    >
+                      {isCurrent ? 'Active Plan' : 'Activate Google Map Location Plan'}
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}

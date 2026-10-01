@@ -20,6 +20,7 @@ DELETE FROM areas;
 DELETE FROM cities;
 DELETE FROM skills;
 DELETE FROM subscription_features;
+IF OBJECT_ID('global_features', 'U') IS NOT NULL DELETE FROM global_features;
 DELETE FROM features;
 DELETE FROM subscriptions;
 DELETE FROM roles;
@@ -41,11 +42,54 @@ GO
 -- -----------------------------------------------------------------------------
 SET IDENTITY_INSERT subscriptions ON;
 INSERT INTO subscriptions (id, name, target_role, price, duration_months, description, features) VALUES
-(1, 'Student Free Pass', 'student', 0.00, 12, 'Basic free student search pass', 'Access to music directory, Send up to 5 inquiries/month'),
-(2, 'Student Premium VIP Pass', 'student', 199.00, 12, 'Unlimited student access with priority responses', 'Unlimited Inquiries, Direct Tutor WhatsApp Chat, Discount on Music Events'),
-(3, 'Gold Guru Academy', 'academy', 499.00, 12, 'Priority placement for music academies', 'Listed under up to 5 Skills, Direct Phone & WhatsApp Display, Verified Trust Seal'),
-(4, 'Diamond Academy', 'academy', 999.00, 12, 'Top featured placement for music academies', 'Top 3 Search Placement, Unlimited Skills Mapping, Priority Support & Direct Leads');
+(1, 'Free Plan', 'academy', 0.00, 12, 'Includes basic directory listing and student inquiries.', ''),
+(2, 'Social Media Plan', 'academy', 499.00, 12, 'Free Plan features plus Social Media links visible on profile.', 'Social Media'),
+(3, 'Google Map Location Plan', 'academy', 999.00, 12, 'Free Plan features plus interactive Google Map Location on profile.', 'Google Map Location'),
+(4, 'Social Media & Google Map Plan', 'academy', 1499.00, 12, 'Includes all features: Social Media links & interactive Google Map Location.', 'Social Media, Google Map Location');
 SET IDENTITY_INSERT subscriptions OFF;
+GO
+
+-- -----------------------------------------------------------------------------
+-- 1A. SEED FEATURES MASTER TABLE (FOR PRICING PLANS)
+-- -----------------------------------------------------------------------------
+SET IDENTITY_INSERT features ON;
+INSERT INTO features (id, name, description) VALUES
+(1, 'Social Media', 'Showcase WhatsApp, Instagram, YouTube, Facebook, LinkedIn, Website'),
+(2, 'Google Map Location', 'Interactive Google Maps location embed on profile');
+SET IDENTITY_INSERT features OFF;
+GO
+
+-- -----------------------------------------------------------------------------
+-- 1B. SEED SUBSCRIPTION_FEATURES JUNCTION TABLE
+-- -----------------------------------------------------------------------------
+-- Plan 2 (Social Media Plan): Social Media
+INSERT INTO subscription_features (subscription_id, feature_id) VALUES
+(2, 1);
+
+-- Plan 3 (Google Map Location Plan): Google Map Location ONLY
+INSERT INTO subscription_features (subscription_id, feature_id) VALUES
+(3, 2);
+
+-- Plan 4 (Social Media & Google Map Plan): Social Media + Google Map Location
+INSERT INTO subscription_features (subscription_id, feature_id) VALUES
+(4, 1), (4, 2);
+GO
+
+-- -----------------------------------------------------------------------------
+-- 1C. SEED GLOBAL FEATURES MASTER TABLE (FOR GLOBAL PLATFORM TOGGLES)
+-- -----------------------------------------------------------------------------
+IF OBJECT_ID('global_features', 'U') IS NOT NULL
+BEGIN
+    SET IDENTITY_INSERT global_features ON;
+    INSERT INTO global_features (id, name, description) VALUES
+    (1, 'Directory Listing', 'Basic directory listing and search discovery'),
+    (2, 'Photos & Gallery', 'Upload profile photo and studio banner photos'),
+    (3, 'Instrument Mapping', 'Link instruments and skill specializations'),
+    (4, 'Send Inquiry', 'Direct student lead inquiry capture form'),
+    (5, 'Social Media', 'Showcase WhatsApp, Instagram, YouTube, Facebook, LinkedIn, Website'),
+    (6, 'Google Map Location', 'Interactive Google Maps location embed on profile');
+    SET IDENTITY_INSERT global_features OFF;
+END
 GO
 
 -- -----------------------------------------------------------------------------
@@ -120,8 +164,8 @@ GO
 SET IDENTITY_INSERT users ON;
 INSERT INTO users (id, username, email, password_hash, full_name, phone, role_id, subscription_id) VALUES
 (1, 'admin', 'admin@musicgurukul.com', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'Super Admin', '+91 99000 00000', 1, NULL),
-(2, 'gaurav_mehra', 'gaurav.mehra@musicgurukul.com', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Gaurav Mehra', '+91 98230 44112', 2, 4),
-(3, 'rahul_student', 'rahul.s@example.com', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Rahul Sharma', '+91 98765 43210', 3, 2);
+(2, 'gaurav_mehra', 'gaurav.mehra@musicgurukul.com', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Gaurav Mehra', '+91 98230 44112', 2, 1),
+(3, 'rahul_student', 'rahul.s@example.com', 'ef92b778bafe771e89245b89ecbc08a44a4e166c06659911881f383d4473e94f', 'Rahul Sharma', '+91 98765 43210', 3, 1);
 SET IDENTITY_INSERT users OFF;
 GO
 
@@ -130,8 +174,8 @@ GO
 -- -----------------------------------------------------------------------------
 SET IDENTITY_INSERT user_subscriptions ON;
 INSERT INTO user_subscriptions (id, user_id, subscription_id, start_date, expiry_date, status, payment_status) VALUES
-(1, 3, 2, '2026-01-01', '2027-01-01', 'Active', 'Paid'),
-(2, 2, 4, '2026-01-10', '2027-01-10', 'Active', 'Paid');
+(1, 3, 1, '2026-01-01', '2027-01-01', 'Active', 'Paid'),
+(2, 2, 1, '2026-01-10', '2027-01-10', 'Active', 'Free');
 SET IDENTITY_INSERT user_subscriptions OFF;
 GO
 
@@ -140,7 +184,7 @@ GO
 -- -----------------------------------------------------------------------------
 SET IDENTITY_INSERT academies ON;
 INSERT INTO academies (id, slug, academy_name, teacher_name, email, phone, user_id, subscription_id, city_id, area_id, experience_years, rating, status, fees_per_month) VALUES
-(1, 'gaurav-mehra-guitar-academy', 'Gaurav Mehra Guitar Academy', 'Gaurav Mehra', 'gaurav.mehra@musicgurukul.com', '+91 98230 44112', 2, 4, 1, 101, 12, 4.90, 'Approved', 2500.00);
+(1, 'gaurav-mehra-guitar-academy', 'Gaurav Mehra Guitar Academy', 'Gaurav Mehra', 'gaurav.mehra@musicgurukul.com', '+91 98230 44112', 2, 1, 1, 101, 12, 4.90, 'Approved', 2500.00);
 SET IDENTITY_INSERT academies OFF;
 GO
 

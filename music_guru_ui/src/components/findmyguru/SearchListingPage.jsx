@@ -19,17 +19,12 @@ import {
 } from 'lucide-react';
 
 const SearchListingPage = () => {
-  const { academies, cities, skills, searchFilters, setSearchFilters, features, currentRole } = useGuru();
+  const { academies, cities, skills, searchFilters, setSearchFilters, currentRole, checkSendInquiryAccess, checkSocialMediaAccess, isGlobalFeatureActive } = useGuru();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams();
 
-  const sendEnquiryFeature = (features || []).find(
-    (f) => (f.name || '').toLowerCase().trim() === 'send enquiry' || f.id === 'feat-1'
-  );
-  const isEnquiryActive = sendEnquiryFeature
-    ? (sendEnquiryFeature.is_active !== false && sendEnquiryFeature.isActive !== false)
-    : true;
+  const isEnquiryActive = isGlobalFeatureActive('Send Inquiry');
   const showSendEnquiryButton = isEnquiryActive || currentRole === 'SUPER_ADMIN';
 
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
@@ -517,13 +512,23 @@ const SearchListingPage = () => {
                       </button>
 
                       {showSendEnquiryButton && (
-                        <button
-                          onClick={() => setSelectedAcademyForInquiry(acad)}
-                          className="flex-1 sm:flex-none px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl shadow-md transition-all flex items-center justify-center space-x-1"
-                        >
-                          <PhoneCall className="w-3.5 h-3.5" />
-                          <span>Send Inquiry</span>
-                        </button>
+                        checkSendInquiryAccess(acad) ? (
+                          <button
+                            onClick={() => setSelectedAcademyForInquiry(acad)}
+                            className="flex-1 sm:flex-none px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl shadow-md transition-all flex items-center justify-center space-x-1"
+                          >
+                            <PhoneCall className="w-3.5 h-3.5" />
+                            <span>Send Inquiry</span>
+                          </button>
+                        ) : (
+                          <button
+                            disabled
+                            title="Direct Send Inquiry is disabled on this academy's Free/Social Media plan. Requires Send Inquiry Plan."
+                            className="flex-1 sm:flex-none px-4 py-2.5 bg-gray-100 text-gray-400 text-xs font-semibold rounded-xl cursor-not-allowed border border-gray-200 flex items-center justify-center space-x-1"
+                          >
+                            <span>Inquiry Disabled</span>
+                          </button>
+                        )
                       )}
                     </div>
                   </div>

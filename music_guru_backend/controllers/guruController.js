@@ -146,11 +146,41 @@ const parseCommaList = (str, fallback) => {
   return fallback;
 };
 
+const formatDateStr = (val) => {
+  if (!val) return null;
+  try {
+    const d = new Date(val);
+    if (isNaN(d.getTime())) return String(val).split('T')[0];
+    return d.toISOString().split('T')[0];
+  } catch (e) {
+    return String(val).split('T')[0];
+  }
+};
+
 const formatAcademyRow = (row) => {
+  const expDate = formatDateStr(row.subscriptionExpiry || row.subscription_expiry || row.expiry_date)
+    || (row.created_at ? formatDateStr(new Date(new Date(row.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+
+  const planName = (row.subscriptionPlanName || row.subscription_name || 'Free Plan').trim();
+  const planNameLower = planName.toLowerCase();
+
+  const hasSocialMedia = planNameLower.includes('social media') || planNameLower.includes('google map') || planNameLower.includes('send inquiry');
+  const hasGoogleMap = planNameLower.includes('google map') || planNameLower.includes('diamond');
+  const hasSendInquiry = true; // Send Inquiry included in Free Plan and all subscription tiers
+
   return {
     ...row,
     pincode: row.pincode || row.pin_code || row.areaPincode || '',
     skills: row.skillsList ? row.skillsList.split(', ') : ['Guitar', 'Western Music', 'Vocal'],
+    subscriptionPlanId: row.subscriptionPlanId || row.subscription_id || 'plan-1',
+    subscriptionPlanName: planName,
+    subscriptionStatus: row.subscriptionStatus || row.subscription_status || 'Active',
+    subscriptionStart: formatDateStr(row.subscriptionStart || row.subscription_start || row.start_date) || (row.created_at ? formatDateStr(row.created_at) : new Date().toISOString().split('T')[0]),
+    subscriptionExpiry: expDate,
+    validUntil: expDate,
+    hasSocialMedia,
+    hasGoogleMap,
+    hasSendInquiry,
     profileImage: row.profileImage || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80',
     coverImage: row.coverImage || 'https://images.unsplash.com/photo-1465847899084-d164df4dedc6?auto=format&fit=crop&w=1200&q=80',
     teachingMode: parseCommaList(row.teachingModesRaw, ['Offline', 'Online']),
@@ -184,6 +214,8 @@ exports.getAcademies = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
+        sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
           SELECT STRING_AGG(s.name, ', ') 
@@ -194,6 +226,12 @@ exports.getAcademies = async (req, res) => {
       FROM academies a
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
+      LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
+      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
+      LEFT JOIN subscriptions sub ON (
+        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+      )
       WHERE a.deleted = 0
     `;
 
@@ -250,7 +288,8 @@ exports.getAcademyApprovals = async (req, res) => {
         a.rating, a.status, a.fees_per_month AS feesPerMonth, a.address, a.bio AS about,
         a.teaching_modes AS teachingModesRaw, a.batch_types AS batchTypesRaw, a.languages AS languagesRaw,
         a.profile_image AS profileImage, a.cover_image AS coverImage, a.map_url AS mapUrl,
-        a.created_at AS createdAt,
+        a.created_at AS createdAt, sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
         (
           SELECT STRING_AGG(s.name, ', ') 
           FROM academy_skills ask 
@@ -260,6 +299,12 @@ exports.getAcademyApprovals = async (req, res) => {
       FROM academies a
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
+      LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
+      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
+      LEFT JOIN subscriptions sub ON (
+        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+      )
       WHERE a.deleted = 0
     `;
 
@@ -381,6 +426,8 @@ exports.getAcademyBySlug = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
+        sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
           SELECT STRING_AGG(s.name, ', ') 
@@ -391,6 +438,12 @@ exports.getAcademyBySlug = async (req, res) => {
       FROM academies a
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
+      LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
+      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
+      LEFT JOIN subscriptions sub ON (
+        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+      )
       WHERE a.deleted = 0 AND (a.slug = @slug OR a.id = TRY_CAST(@slug AS INT) OR CAST(a.id AS VARCHAR(100)) = @slug)
     `, [
       { name: 'slug', type: sql.VarChar, value: String(slug) }
@@ -1017,18 +1070,32 @@ exports.createAcademy = async (req, res) => {
       }
     }
 
+    let freeSubId = null;
+    let freeSubName = 'Free Academy Listing';
+    try {
+      const freeSubRes = await executeQuery(`
+        SELECT TOP 1 id, name FROM subscriptions 
+        WHERE deleted = 0 AND (LOWER(target_role) = 'academy' OR price = 0 OR LOWER(name) LIKE '%free%') 
+        ORDER BY price ASC
+      `);
+      if (freeSubRes?.recordset?.length > 0) {
+        freeSubId = freeSubRes.recordset[0].id;
+        freeSubName = freeSubRes.recordset[0].name;
+      }
+    } catch (sErr) { }
+
     let createdAcadId = null;
 
     try {
       const res = await executeQuery(`
         INSERT INTO academies (
           slug, academy_name, teacher_name, email, phone, city_id, area_id, address,
-          status, deleted, created_at, updated_at
+          user_id, subscription_id, status, deleted, created_at, updated_at
         )
         OUTPUT INSERTED.id
         VALUES (
           @slug, @academyName, @teacherName, @email, @phone, @cityId, @areaId, @address,
-          'Pending', 0, GETDATE(), GETDATE()
+          @userId, @subId, 'Pending', 0, GETDATE(), GETDATE()
         )
       `, [
         { name: 'slug', type: sql.VarChar, value: slug },
@@ -1038,7 +1105,9 @@ exports.createAcademy = async (req, res) => {
         { name: 'phone', type: sql.VarChar, value: cleanPhone },
         { name: 'cityId', type: sql.VarChar, value: cityId ? String(cityId) : null },
         { name: 'areaId', type: sql.VarChar, value: areaId ? String(areaId) : null },
-        { name: 'address', type: sql.VarChar, value: `${area || ''}, ${city || ''}` }
+        { name: 'address', type: sql.VarChar, value: `${area || ''}, ${city || ''}` },
+        { name: 'userId', type: sql.VarChar, value: userId ? String(userId) : null },
+        { name: 'subId', type: sql.VarChar, value: freeSubId ? String(freeSubId) : null }
       ]);
       createdAcadId = res?.recordset?.[0]?.id;
     } catch (aErr) {
@@ -1046,10 +1115,10 @@ exports.createAcademy = async (req, res) => {
       await executeQuery(`
         INSERT INTO academies (
           id, slug, academy_name, teacher_name, email, phone, city_id, area_id, address,
-          status, deleted, created_at, updated_at
+          user_id, subscription_id, status, deleted, created_at, updated_at
         ) VALUES (
           @id, @slug, @academyName, @teacherName, @email, @phone, @cityId, @areaId, @address,
-          'Pending', 0, GETDATE(), GETDATE()
+          @userId, @subId, 'Pending', 0, GETDATE(), GETDATE()
         )
       `, [
         { name: 'id', type: sql.VarChar, value: newId },
@@ -1060,9 +1129,22 @@ exports.createAcademy = async (req, res) => {
         { name: 'phone', type: sql.VarChar, value: cleanPhone },
         { name: 'cityId', type: sql.VarChar, value: cityId ? String(cityId) : null },
         { name: 'areaId', type: sql.VarChar, value: areaId ? String(areaId) : null },
-        { name: 'address', type: sql.VarChar, value: `${area || ''}, ${city || ''}` }
+        { name: 'address', type: sql.VarChar, value: `${area || ''}, ${city || ''}` },
+        { name: 'userId', type: sql.VarChar, value: userId ? String(userId) : null },
+        { name: 'subId', type: sql.VarChar, value: freeSubId ? String(freeSubId) : null }
       ]);
       createdAcadId = newId;
+    }
+
+    if (userId && freeSubId) {
+      try {
+        await executeQuery(`
+          UPDATE users SET subscription_id = ISNULL(subscription_id, @subId) WHERE (id = TRY_CAST(@userId AS INT) OR CAST(id AS VARCHAR(100)) = @userId)
+        `, [
+          { name: 'userId', type: sql.VarChar, value: String(userId) },
+          { name: 'subId', type: sql.VarChar, value: String(freeSubId) }
+        ]);
+      } catch (uSubErr) { }
     }
 
     if (Array.isArray(skills) && skills.length > 0 && createdAcadId) {
@@ -1082,7 +1164,7 @@ exports.createAcademy = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Academy registered successfully in database and pending approval.',
+      message: 'Academy registered successfully in database with active free plan.',
       data: {
         id: createdAcadId,
         slug,
@@ -1092,7 +1174,10 @@ exports.createAcademy = async (req, res) => {
         phone: cleanPhone,
         city,
         area,
-        status: 'Pending'
+        status: 'Pending',
+        subscriptionPlanId: freeSubId || 'plan-1',
+        subscriptionPlanName: freeSubName || 'Free Academy Listing',
+        subscriptionStatus: 'Active'
       }
     });
   } catch (error) {
@@ -1307,6 +1392,26 @@ exports.getFeatures = async (req, res) => {
   }
 };
 
+exports.getGlobalFeatures = async (req, res) => {
+  try {
+    const result = await executeQuery(`
+      IF OBJECT_ID('global_features', 'U') IS NOT NULL
+        SELECT id, name, description, is_active AS isActive FROM global_features WHERE deleted = 0 ORDER BY name ASC
+      ELSE
+        SELECT id, name, description, is_active AS isActive FROM features WHERE deleted = 0 ORDER BY name ASC
+    `);
+
+    if (result && result.recordset) {
+      return res.json({ success: true, data: result.recordset });
+    }
+
+    res.json({ success: true, data: [] });
+  } catch (error) {
+    console.error('Error fetching global features:', error.message);
+    res.status(500).json({ success: false, message: 'Error retrieving global features.', error: error.message });
+  }
+};
+
 exports.createFeature = async (req, res) => {
   try {
     const { name, description } = req.body;
@@ -1369,13 +1474,98 @@ exports.updateFeature = async (req, res) => {
 exports.deleteFeature = async (req, res) => {
   try {
     const { id } = req.params;
-    await executeQuery(`UPDATE features SET deleted = 1, updated_at = GETDATE() WHERE (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id OR LOWER(name) = LOWER(@id))`, [
+    await executeQuery(`
+      UPDATE features SET deleted = 1, updated_at = GETDATE() WHERE (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id OR LOWER(name) = LOWER(@id))
+    `, [
       { name: 'id', type: sql.VarChar, value: String(id) }
     ]);
     return res.json({ success: true, message: 'Feature deleted successfully.' });
   } catch (error) {
     console.error('Error deleting feature:', error.message);
     res.status(500).json({ success: false, message: 'Failed to delete feature.', error: error.message });
+  }
+};
+
+exports.createGlobalFeature = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Global feature name is required.' });
+    }
+
+    const cleanName = name.trim();
+
+    const result = await executeQuery(`
+      IF OBJECT_ID('global_features', 'U') IS NOT NULL
+      BEGIN
+        INSERT INTO global_features (name, description, is_active, deleted, created_at, updated_at)
+        OUTPUT INSERTED.id
+        VALUES (@name, @description, 1, 0, GETDATE(), GETDATE())
+      END
+    `, [
+      { name: 'name', type: sql.VarChar, value: cleanName },
+      { name: 'description', type: sql.VarChar, value: description || '' }
+    ]);
+
+    const newId = result && result.recordset && result.recordset[0] ? result.recordset[0].id : Date.now();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Global feature created successfully.',
+      data: { id: newId, name: cleanName, description: description || '', isActive: true, is_active: true }
+    });
+  } catch (error) {
+    console.error('Error creating global feature:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to create global feature.', error: error.message });
+  }
+};
+
+exports.updateGlobalFeature = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, is_active, isActive } = req.body;
+    const activeVal = is_active !== undefined ? (is_active ? 1 : 0) : (isActive !== undefined ? (isActive ? 1 : 0) : null);
+
+    await executeQuery(`
+      IF OBJECT_ID('global_features', 'U') IS NOT NULL
+      BEGIN
+        UPDATE global_features
+        SET
+          name = ISNULL(@name, name),
+          description = ISNULL(@description, description),
+          is_active = ISNULL(@is_active, is_active),
+          updated_at = GETDATE()
+        WHERE deleted = 0 AND (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id OR LOWER(name) = LOWER(@id))
+      END
+    `, [
+      { name: 'id', type: sql.VarChar, value: String(id) },
+      { name: 'name', type: sql.VarChar, value: name ? name.trim() : null },
+      { name: 'description', type: sql.VarChar, value: description !== undefined ? description : null },
+      { name: 'is_active', type: sql.Bit, value: activeVal }
+    ]);
+
+    return res.json({ success: true, message: 'Global feature updated successfully.' });
+  } catch (error) {
+    console.error('Error updating global feature:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to update global feature.', error: error.message });
+  }
+};
+
+exports.deleteGlobalFeature = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await executeQuery(`
+      IF OBJECT_ID('global_features', 'U') IS NOT NULL
+      BEGIN
+        UPDATE global_features SET deleted = 1, updated_at = GETDATE() WHERE (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id OR LOWER(name) = LOWER(@id))
+      END
+    `, [
+      { name: 'id', type: sql.VarChar, value: String(id) }
+    ]);
+    return res.json({ success: true, message: 'Global feature deleted successfully.' });
+  } catch (error) {
+    console.error('Error deleting global feature:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to delete global feature.', error: error.message });
   }
 };
 

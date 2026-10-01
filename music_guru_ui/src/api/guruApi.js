@@ -73,6 +73,22 @@ export const guruApi = {
     return await axiosClient.delete(`/features/${id}`);
   },
 
+  getGlobalFeatures: async () => {
+    return await axiosClient.get('/global-features');
+  },
+
+  createGlobalFeature: async (featureData) => {
+    return await axiosClient.post('/global-features', featureData);
+  },
+
+  updateGlobalFeature: async (id, featureData) => {
+    return await axiosClient.put(`/global-features/${id}`, featureData);
+  },
+
+  deleteGlobalFeature: async (id) => {
+    return await axiosClient.delete(`/global-features/${id}`);
+  },
+
   getPlans: async () => {
     return await axiosClient.get('/plans');
   },

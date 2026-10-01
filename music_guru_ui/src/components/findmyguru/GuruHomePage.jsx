@@ -19,15 +19,10 @@ import {
 } from 'lucide-react';
 
 const GuruHomePage = () => {
-  const { cities, skills, academies, homeStats, setSearchFilters, features, currentRole } = useGuru();
+  const { cities, skills, academies, homeStats, setSearchFilters, currentRole, isGlobalFeatureActive } = useGuru();
   const navigate = useNavigate();
 
-  const sendEnquiryFeature = (features || []).find(
-    (f) => (f.name || '').toLowerCase().trim() === 'send enquiry' || f.id === 'feat-1'
-  );
-  const isEnquiryActive = sendEnquiryFeature
-    ? (sendEnquiryFeature.is_active !== false && sendEnquiryFeature.isActive !== false)
-    : true;
+  const isEnquiryActive = isGlobalFeatureActive('Send Inquiry');
   const showSendEnquiryButton = isEnquiryActive || currentRole === 'SUPER_ADMIN';
 
   const [selectedCity, setSelectedCity] = useState('All');

@@ -4,15 +4,9 @@ import LoaderSpinner from './LoaderSpinner';
 import { X, Send, CheckCircle2, User, Phone, Mail, Music, MapPin, Clock, MessageSquare, AlertCircle, RefreshCw } from 'lucide-react';
 
 const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
-  const { submitInquiry, skills, features, currentRole } = useGuru();
+  const { submitInquiry, skills, currentRole, isGlobalFeatureActive } = useGuru();
 
-  const sendEnquiryFeature = (features || []).find(
-    (f) => (f.name || '').toLowerCase().trim() === 'send enquiry' || f.id === 'feat-1'
-  );
-  const isEnquiryActive = sendEnquiryFeature
-    ? (sendEnquiryFeature.is_active !== false && sendEnquiryFeature.isActive !== false)
-    : true;
-
+  const isEnquiryActive = isGlobalFeatureActive('Send Inquiry');
   const isSuperAdmin = currentRole === 'SUPER_ADMIN';
 
   const [formData, setFormData] = useState({

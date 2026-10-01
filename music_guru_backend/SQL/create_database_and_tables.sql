@@ -47,10 +47,22 @@ CREATE TABLE subscriptions (
 GO
 
 -- -----------------------------------------------------------------------------
--- 3A. FEATURES MASTER TABLE
+-- 3A. GLOBAL FEATURES MASTER TABLE
 -- -----------------------------------------------------------------------------
-CREATE TABLE features (
+CREATE TABLE global_features (
     id INT IDENTITY(1,1) PRIMARY KEY, -- Use AUTO_INCREMENT in MySQL
+    name VARCHAR(150) NOT NULL UNIQUE,
+    description VARCHAR(255),
+    is_active BIT NOT NULL DEFAULT 1,
+    deleted BIT NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT GETDATE(),
+    updated_at DATETIME DEFAULT GETDATE()
+);
+GO
+
+-- Legacy Features table for backwards compatibility
+CREATE TABLE features (
+    id INT IDENTITY(1,1) PRIMARY KEY,
     name VARCHAR(150) NOT NULL UNIQUE,
     description VARCHAR(255),
     is_active BIT NOT NULL DEFAULT 1,
@@ -70,8 +82,7 @@ CREATE TABLE subscription_features (
     created_at DATETIME DEFAULT GETDATE(),
     updated_at DATETIME DEFAULT GETDATE(),
     PRIMARY KEY (subscription_id, feature_id),
-    CONSTRAINT fk_subfeat_subscription FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
-    CONSTRAINT fk_subfeat_feature FOREIGN KEY (feature_id) REFERENCES features(id) ON DELETE CASCADE
+    CONSTRAINT fk_subfeat_subscription FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 );
 GO
 

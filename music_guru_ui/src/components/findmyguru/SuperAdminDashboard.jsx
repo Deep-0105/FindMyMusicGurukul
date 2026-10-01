@@ -47,9 +47,13 @@ const SuperAdminDashboard = () => {
     updateSkill,
     deleteSkill,
     features,
+    globalFeatures,
     addFeature,
     updateFeature,
     deleteFeature,
+    addGlobalFeature,
+    updateGlobalFeature,
+    deleteGlobalFeature,
     plans,
     addPlan,
     updatePlan,
@@ -115,7 +119,7 @@ const SuperAdminDashboard = () => {
   const handleToggleFeatureActive = (feat) => {
     const currentActive = feat.is_active !== undefined ? feat.is_active : (feat.isActive !== undefined ? feat.isActive : true);
     const nextActive = !currentActive;
-    updateFeature(feat.id, {
+    updateGlobalFeature(feat.id, {
       ...feat,
       is_active: nextActive,
       isActive: nextActive
@@ -143,14 +147,14 @@ const SuperAdminDashboard = () => {
     e.preventDefault();
     if (!featureForm.name.trim()) return;
     if (editingFeatureId) {
-      updateFeature(editingFeatureId, {
+      updateGlobalFeature(editingFeatureId, {
         name: featureForm.name.trim(),
         description: featureForm.description.trim(),
         is_active: featureForm.is_active,
         isActive: featureForm.is_active
       });
     } else {
-      addFeature({
+      addGlobalFeature({
         name: featureForm.name.trim(),
         description: featureForm.description.trim(),
         is_active: featureForm.is_active,
@@ -409,7 +413,7 @@ const SuperAdminDashboard = () => {
               }`}
           >
             <Sparkles className="w-4 h-4" />
-            <span>Master Features ({features.length})</span>
+            <span>Master Features ({globalFeatures.length})</span>
           </button>
 
           <button
@@ -533,7 +537,10 @@ const SuperAdminDashboard = () => {
                         </span>
                       </td>
                       <td className="p-3">
-                        <span className="font-semibold text-purple-700 block">{a.subscriptionPlanName}</span>
+                        <span className="font-semibold text-purple-700 block">{a.subscriptionPlanName || 'Free Listing'}</span>
+                        <span className="text-[10px] text-emerald-700 font-semibold block my-0.5">
+                          Valid until: {a.subscriptionExpiry || a.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
+                        </span>
                         <button
                           onClick={() => toggleAcademySubscription(a.id)}
                           className={`text-[10px] font-bold px-2 py-0.5 rounded ${a.subscriptionStatus === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
@@ -702,7 +709,7 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {(features || []).map((feat) => {
+              {(globalFeatures || []).map((feat) => {
                 const featActive = feat.is_active !== undefined ? feat.is_active : (feat.isActive !== undefined ? feat.isActive : true);
                 return (
                   <div
@@ -758,7 +765,7 @@ const SuperAdminDashboard = () => {
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => deleteFeature(feat.id)}
+                        onClick={() => deleteGlobalFeature(feat.id)}
                         title="Delete Feature"
                         className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                       >

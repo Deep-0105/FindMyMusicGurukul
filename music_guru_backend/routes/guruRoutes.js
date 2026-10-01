@@ -13,6 +13,11 @@ router.post('/features', guruController.createFeature);
 router.put('/features/:id', guruController.updateFeature);
 router.delete('/features/:id', guruController.deleteFeature);
 
+router.get('/global-features', guruController.getGlobalFeatures);
+router.post('/global-features', guruController.createGlobalFeature);
+router.put('/global-features/:id', guruController.updateGlobalFeature);
+router.delete('/global-features/:id', guruController.deleteGlobalFeature);
+
 // Subscription Pricing Plans Endpoints
 router.get('/plans', guruController.getPlans);
 router.post('/plans', guruController.createPlan);

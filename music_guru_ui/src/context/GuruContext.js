@@ -27,10 +27,46 @@ export const GuruProvider = ({ children }) => {
     }
   }, [currentUser]);
 
+  const DEFAULT_4_PLANS = [
+    {
+      id: 'plan-1',
+      name: 'Free Plan',
+      price: 0,
+      durationMonths: 12,
+      description: 'Includes basic directory listing and student inquiries.',
+      features: []
+    },
+    {
+      id: 'plan-2',
+      name: 'Social Media Plan',
+      price: 499,
+      durationMonths: 12,
+      description: 'Free Plan features plus Social Media links visible on profile.',
+      features: ['Social Media']
+    },
+    {
+      id: 'plan-3',
+      name: 'Google Map Location Plan',
+      price: 999,
+      durationMonths: 12,
+      description: 'Free Plan features plus interactive Google Map Location on profile.',
+      features: ['Google Map Location']
+    },
+    {
+      id: 'plan-4',
+      name: 'Social Media & Google Map Plan',
+      price: 1499,
+      durationMonths: 12,
+      description: 'Includes all features: Social Media links & interactive Google Map Location.',
+      features: ['Social Media', 'Google Map Location']
+    }
+  ];
+
   const [cities, setCities] = useState([]);
   const [skills, setSkills] = useState([]);
   const [features, setFeatures] = useState([]);
-  const [plans, setPlans] = useState([]);
+  const [globalFeatures, setGlobalFeatures] = useState([]);
+  const [plans, setPlans] = useState(DEFAULT_4_PLANS);
   const [academies, setAcademies] = useState([]);
   const [inquiries, setInquiries] = useState([]);
   const [raidLogs, setRaidLogs] = useState([]);
@@ -94,11 +130,12 @@ export const GuruProvider = ({ children }) => {
   useEffect(() => {
     const loadBackendData = async () => {
       try {
-        const [liveAcademies, liveCities, liveSkills, liveFeatures, livePlans, liveStats, liveInquiries] = await Promise.all([
+        const [liveAcademies, liveCities, liveSkills, liveFeatures, liveGlobalFeatures, livePlans, liveStats, liveInquiries] = await Promise.all([
           guruService.fetchAllAcademies(),
           guruService.fetchCities(),
           guruService.fetchSkills(),
           guruService.fetchFeatures(),
+          guruService.fetchGlobalFeatures(),
           guruService.fetchPlans(),
           guruService.fetchHomeStats(),
           guruService.fetchInquiries()
@@ -119,6 +156,13 @@ export const GuruProvider = ({ children }) => {
             return { ...f, is_active: activeState, isActive: activeState };
           });
           setFeatures(formattedFeats);
+        }
+        if (liveGlobalFeatures && Array.isArray(liveGlobalFeatures)) {
+          const formattedGlobalFeats = liveGlobalFeatures.map((f) => {
+            const activeState = f.is_active !== undefined ? f.is_active : (f.isActive !== undefined ? f.isActive : true);
+            return { ...f, is_active: activeState, isActive: activeState };
+          });
+          setGlobalFeatures(formattedGlobalFeats);
         }
         if (livePlans && Array.isArray(livePlans)) {
           const formattedPlans = livePlans.map((p) => ({
@@ -143,6 +187,8 @@ export const GuruProvider = ({ children }) => {
   const registerAcademy = async (formData) => {
     const slug = formData.academyName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
     const tempId = `acad-${Date.now()}`;
+    const freePlan = (plans || []).find((p) => p.price === 0 || (p.name || '').toLowerCase().includes('free')) || { id: 'plan-1', name: 'Free Listing' };
+
     const newAcademy = {
       id: tempId,
       slug,
@@ -179,11 +225,11 @@ export const GuruProvider = ({ children }) => {
       },
       gallery: [],
       status: 'Pending',
-      subscriptionPlanId: 'plan-1',
-      subscriptionPlanName: 'Free Listing',
+      subscriptionPlanId: freePlan.id || 'plan-1',
+      subscriptionPlanName: freePlan.name || 'Free Listing',
       subscriptionStatus: 'Active',
       subscriptionStart: new Date().toISOString().split('T')[0],
-      subscriptionExpiry: new Date(Date.now() + 365*24*60*60*1000).toISOString().split('T')[0],
+      subscriptionExpiry: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       featured: false,
       raidStatus: 'GREEN',
       profileViews: 1,
@@ -197,9 +243,22 @@ export const GuruProvider = ({ children }) => {
       const res = await guruService.registerAcademy(formData);
       if (res && (res.success || res.data)) {
         const backendId = res.data?.id || res.id;
+        const subId = res.data?.subscriptionPlanId || freePlan.id || 'plan-1';
+        const subName = res.data?.subscriptionPlanName || freePlan.name || 'Free Listing';
+        const subStatus = res.data?.subscriptionStatus || 'Active';
         if (backendId) {
           setAcademies((prev) =>
-            prev.map((acc) => (acc.id === tempId ? { ...acc, id: backendId } : acc))
+            prev.map((acc) =>
+              acc.id === tempId
+                ? {
+                    ...acc,
+                    id: backendId,
+                    subscriptionPlanId: subId,
+                    subscriptionPlanName: subName,
+                    subscriptionStatus: subStatus
+                  }
+                : acc
+            )
           );
           setActiveAcademyId(backendId);
         }
@@ -403,6 +462,58 @@ export const GuruProvider = ({ children }) => {
     }
   };
 
+  const addGlobalFeature = async (featObj) => {
+    const tempId = `gfeat-${Date.now()}`;
+    const initialActive = featObj.is_active !== undefined ? featObj.is_active : (featObj.isActive !== undefined ? featObj.isActive : true);
+    const newFeat = {
+      id: tempId,
+      name: featObj.name,
+      description: featObj.description || '',
+      is_active: initialActive,
+      isActive: initialActive
+    };
+    setGlobalFeatures((prev) => [...prev, newFeat]);
+
+    try {
+      const res = await guruService.createGlobalFeature({ ...featObj, is_active: initialActive, isActive: initialActive });
+      if (res && res.data && res.data.id) {
+        setGlobalFeatures((prev) =>
+          prev.map((f) => (f.id === tempId ? { ...f, id: res.data.id } : f))
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to create global feature on backend API:', err);
+    }
+  };
+
+  const updateGlobalFeature = async (featureId, updated) => {
+    setGlobalFeatures((prev) =>
+      prev.map((f) => {
+        if (f.id === featureId || String(f.id) === String(featureId)) {
+          const nextActive = updated.is_active !== undefined
+            ? updated.is_active
+            : (updated.isActive !== undefined ? updated.isActive : (f.is_active !== undefined ? f.is_active : true));
+          return { ...f, ...updated, is_active: nextActive, isActive: nextActive };
+        }
+        return f;
+      })
+    );
+    try {
+      await guruService.updateGlobalFeature(featureId, updated);
+    } catch (err) {
+      console.warn('Failed to update global feature on backend API:', err);
+    }
+  };
+
+  const deleteGlobalFeature = async (featureId) => {
+    setGlobalFeatures((prev) => prev.filter((f) => f.id !== featureId && String(f.id) !== String(featureId)));
+    try {
+      await guruService.deleteGlobalFeature(featureId);
+    } catch (err) {
+      console.warn('Failed to delete global feature on backend API:', err);
+    }
+  };
+
   const addPlan = async (planObj) => {
     const tempId = `plan-${Date.now()}`;
     const newPlan = {
@@ -443,30 +554,48 @@ export const GuruProvider = ({ children }) => {
     }
   };
 
-  const updateAcademySubscription = (academyId, planId, durationMonths = 12) => {
-    const plan = plans.find((p) => p.id === planId);
+  const updateAcademySubscription = async (academyId, planId, durationMonths = 12) => {
+    const plan = plans.find((p) => p.id === planId || String(p.id) === String(planId));
     if (!plan) return;
+
+    const startDate = new Date().toISOString().split('T')[0];
+    const expiryDate = new Date(Date.now() + durationMonths * 30 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split('T')[0];
+
+    const pName = plan.name || 'Free Plan';
+    const hasSocial = pName.toLowerCase().includes('social media') || pName.toLowerCase().includes('send inquiry');
+    const hasInquiry = pName.toLowerCase().includes('send inquiry');
+
+    const updatedData = {
+      subscriptionPlanId: plan.id,
+      subscription_id: plan.id,
+      subscriptionPlanName: plan.name,
+      subscriptionStatus: 'Active',
+      subscriptionStart: startDate,
+      subscriptionExpiry: expiryDate,
+      hasSocialMedia: hasSocial,
+      hasSendInquiry: hasInquiry,
+      featured: plan.listingPriority ? plan.listingPriority.includes('Featured') : false
+    };
 
     setAcademies((prev) =>
       prev.map((acc) => {
         if (acc.id === academyId) {
-          const startDate = new Date().toISOString().split('T')[0];
-          const expiryDate = new Date(Date.now() + durationMonths * 30 * 24 * 60 * 60 * 1000)
-            .toISOString()
-            .split('T')[0];
           return {
             ...acc,
-            subscriptionPlanId: plan.id,
-            subscriptionPlanName: plan.name,
-            subscriptionStatus: 'Active',
-            subscriptionStart: startDate,
-            subscriptionExpiry: expiryDate,
-            featured: plan.listingPriority ? plan.listingPriority.includes('Featured') : false
+            ...updatedData
           };
         }
         return acc;
       })
     );
+
+    try {
+      await guruService.updateAcademyProfile(academyId, updatedData);
+    } catch (err) {
+      console.warn('Failed to update subscription on backend:', err);
+    }
   };
 
   const toggleAcademySubscription = (academyId) => {
@@ -598,6 +727,50 @@ export const GuruProvider = ({ children }) => {
     setActiveAcademyId('');
   };
 
+  const checkSocialMediaAccess = (academy) => {
+    if (!academy) return false;
+    if (Array.isArray(academy.planFeatures)) {
+      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('social media'))) return true;
+    }
+    if (typeof academy.hasSocialMedia === 'boolean') return academy.hasSocialMedia;
+    const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
+    if (pName.includes('social media') || pName.includes('gold') || pName.includes('diamond')) return true;
+    return false;
+  };
+
+  const checkSendInquiryAccess = (academy) => {
+    // Send Inquiry is now included in Free Plan and all subscription plans!
+    return true;
+  };
+
+  const checkGoogleMapAccess = (academy) => {
+    if (!academy) return false;
+    if (Array.isArray(academy.planFeatures)) {
+      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('google map'))) return true;
+    }
+    if (typeof academy.hasGoogleMap === 'boolean') return academy.hasGoogleMap;
+    const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
+    if (pName.includes('google map') || pName.includes('diamond')) return true;
+    return false;
+  };
+
+  const isGlobalFeatureActive = (featureName) => {
+    if (!featureName) return true;
+    const searchName = String(featureName).toLowerCase().trim();
+    const feat = (globalFeatures || []).find((f) => {
+      const fn = (f.name || '').toLowerCase().trim();
+      if (fn === searchName) return true;
+      if ((searchName.includes('inquiry') || searchName.includes('enquiry')) && (fn.includes('inquiry') || fn.includes('enquiry') || f.id === 1 || f.id === '1' || f.id === 'feat-1')) {
+        return true;
+      }
+      return false;
+    });
+
+    if (!feat) return true;
+    const val = feat.is_active !== undefined ? feat.is_active : (feat.isActive !== undefined ? feat.isActive : true);
+    return val === true || val === 1 || val === '1';
+  };
+
   return (
     <GuruContext.Provider
       value={{
@@ -610,6 +783,7 @@ export const GuruProvider = ({ children }) => {
         cities,
         skills,
         features,
+        globalFeatures,
         plans,
         academies,
         inquiries,
@@ -629,6 +803,9 @@ export const GuruProvider = ({ children }) => {
         addFeature,
         updateFeature,
         deleteFeature,
+        addGlobalFeature,
+        updateGlobalFeature,
+        deleteGlobalFeature,
         addPlan,
         updatePlan,
         deletePlan,
@@ -640,7 +817,11 @@ export const GuruProvider = ({ children }) => {
         exportDataToCSV,
         loginUser,
         registerUser,
-        logoutUser
+        logoutUser,
+        checkSocialMediaAccess,
+        checkSendInquiryAccess,
+        checkGoogleMapAccess,
+        isGlobalFeatureActive
       }}
     >
       {children}
