@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { executeQuery, sql } = require('../config/db');
+const { sendEmail } = require('../utils/mailer');
 
 const hashPassword = (pwd) => crypto.createHash('sha256').update(pwd).digest('hex');
 
@@ -158,14 +159,17 @@ const formatDateStr = (val) => {
 };
 
 const formatAcademyRow = (row) => {
-  const expDate = formatDateStr(row.subscriptionExpiry || row.subscription_expiry || row.expiry_date)
-    || (row.created_at ? formatDateStr(new Date(new Date(row.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
-
   const planName = (row.subscriptionPlanName || row.subscription_name || 'Free Plan').trim();
   const planNameLower = planName.toLowerCase();
+  const isFree = planNameLower.includes('free') || String(row.subscriptionPlanId || row.subscription_id || '').trim() === '1';
 
-  const hasSocialMedia = planNameLower.includes('social media') || planNameLower.includes('google map') || planNameLower.includes('send inquiry');
-  const hasGoogleMap = planNameLower.includes('google map') || planNameLower.includes('diamond');
+  const expDate = isFree
+    ? 'Lifetime Free'
+    : (formatDateStr(row.subscriptionExpiry || row.subscription_expiry || row.expiry_date)
+       || (row.created_at ? formatDateStr(new Date(new Date(row.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]));
+
+  const hasSocialMedia = typeof row.has_social_media === 'boolean' ? row.has_social_media : (row.has_social_media === 1 || row.hasSocialMedia === 1 || planNameLower.includes('social media') || planNameLower.includes('google map'));
+  const hasGoogleMap = typeof row.has_google_map === 'boolean' ? row.has_google_map : (row.has_google_map === 1 || row.hasGoogleMap === 1 || planNameLower.includes('google map') || planNameLower.includes('diamond'));
   const hasSendInquiry = true; // Send Inquiry included in Free Plan and all subscription tiers
 
   return {
@@ -214,8 +218,9 @@ exports.getAcademies = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
-        sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
-        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
+        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        COALESCE(a.subscription_expiry, us.expiry_date) AS subscriptionExpiry, COALESCE(a.subscription_start, us.start_date) AS subscriptionStart, COALESCE(a.subscription_status, us.status) AS subscriptionStatus,
+        a.has_social_media AS hasSocialMedia, a.has_google_map AS hasGoogleMap,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
           SELECT STRING_AGG(s.name, ', ') 
@@ -426,8 +431,9 @@ exports.getAcademyBySlug = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
-        sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
-        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
+        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        COALESCE(a.subscription_expiry, us.expiry_date) AS subscriptionExpiry, COALESCE(a.subscription_start, us.start_date) AS subscriptionStart, COALESCE(a.subscription_status, us.status) AS subscriptionStatus,
+        a.has_social_media AS hasSocialMedia, a.has_google_map AS hasGoogleMap,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
           SELECT STRING_AGG(s.name, ', ') 
@@ -606,7 +612,7 @@ exports.updateAcademyProfile = async (req, res) => {
 
 exports.createInquiry = async (req, res) => {
   try {
-    const { academyId, skillId, skill, studentName, studentEmail, studentPhone, preferredSlot, mode, message } = req.body;
+    const { academyId, skillId, skill, studentName, studentEmail, studentPhone, preferredSlot, mode, message, state, city, area } = req.body;
     const classMode = mode || preferredSlot || 'Offline';
 
     if (!academyId || !studentName || !studentPhone) {
@@ -662,6 +668,114 @@ exports.createInquiry = async (req, res) => {
       message: 'Inquiry submitted successfully to database',
       data: { academyId: resolvedAcademyId, skillId: resolvedSkillId, studentName, studentEmail, studentPhone }
     });
+
+    // Fire-and-forget Email Notification
+    try {
+      const academyResult = await executeQuery(`
+        SELECT 
+          a.academy_name, 
+          a.teacher_name,
+          a.email, 
+          a.subscription_plan_name,
+          a.subscription_status,
+          a.subscription_expiry,
+          c.name AS city_name,
+          ar.name AS area_name,
+          s.name AS skill_name
+        FROM academies a
+        LEFT JOIN cities c ON a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100))
+        LEFT JOIN areas ar ON a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100))
+        LEFT JOIN skills s ON s.id = TRY_CAST(@skillId AS INT) OR CAST(s.id AS VARCHAR(100)) = @skillId
+        WHERE (a.id = TRY_CAST(@academyId AS INT) OR CAST(a.id AS VARCHAR(100)) = @academyId)
+          AND a.deleted = 0
+      `, [
+        { name: 'academyId', type: sql.VarChar, value: String(resolvedAcademyId) },
+        { name: 'skillId', type: sql.VarChar, value: String(resolvedSkillId) }
+      ]);
+
+      if (academyResult.recordset.length > 0) {
+        const acad = academyResult.recordset[0];
+        const teacherName = acad.teacher_name || acad.academy_name || 'Director';
+        const skillName = acad.skill_name || 'Music Classes';
+        
+        // Use student-provided location if available, otherwise fallback to academy location
+        const finalArea = area || acad.area_name || 'N/A';
+        const finalCity = city || acad.city_name || 'N/A';
+        const finalState = state || 'Maharashtra';
+        
+        let isPlanActive = false;
+        if (acad.subscription_status && acad.subscription_status.toLowerCase() !== 'expired') {
+          const expDate = acad.subscription_expiry ? new Date(acad.subscription_expiry) : null;
+          if (expDate && !isNaN(expDate.getTime())) {
+            expDate.setHours(23, 59, 59, 999);
+            if (expDate.getTime() >= Date.now()) {
+              isPlanActive = true;
+            }
+          } else {
+            isPlanActive = true;
+          }
+        }
+        
+        const planName = isPlanActive ? (acad.subscription_plan_name || 'Free Plan').toLowerCase() : 'free plan';
+        const hasViewContacts = planName.includes('view contacts') || planName.includes('google business') || planName.includes('social media') || planName.includes('premium') || planName.includes('combo') || planName.includes('all-in-one');
+        
+        let emailBody = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #f8f9fa; padding: 20px; text-align: center; border: 1px solid #eaeaea;">
+          <h2 style="color: #007bff; margin-bottom: 20px; font-weight: bold; letter-spacing: -0.5px;">FindMyMusicGurukul</h2>
+          
+          <p style="font-size: 15px; color: #333; margin-bottom: 25px; text-align: center;">
+            Dear Mr/Ms ${teacherName} (Director)
+          </p>
+          
+          <p style="font-size: 15px; color: #333; margin-bottom: 25px; text-align: center;">
+            <strong>${studentName}</strong> enquired for Music Classes for ${skillName}.
+          </p>
+          
+          <table style="width: 100%; max-width: 450px; margin: 0 auto 30px; text-align: left; font-size: 14px; color: #555;">
+            <tr>
+              <td style="padding: 8px 0; width: 40%;">User Area :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${finalArea}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0;">User City :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${finalCity}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0;">User State :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${finalState}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0;">Search Date & Time :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td>
+            </tr>
+            ${hasViewContacts ? `
+            <tr>
+              <td style="padding: 8px 0;">Student Email :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${studentEmail}</td>
+            </tr>
+            <tr>
+              <td style="padding: 8px 0;">Student Phone :</td>
+              <td style="padding: 8px 0; font-weight: bold; color: #000;">${studentPhone}</td>
+            </tr>
+            ` : ''}
+          </table>
+
+          <div style="background-color: #f1f1f1; padding: 20px; border-top: 1px solid #ddd; margin: -20px; margin-top: 20px;">
+            <a href="https://findmymusicgurukul.com/guru/admin" style="display: inline-block; background-color: #007bff; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 4px; font-size: 14px;">View Contact Details</a>
+          </div>
+        </div>
+        `;
+
+        await sendEmail({
+          to: acad.email,
+          subject: `New Student Inquiry - ${acad.academy_name}`,
+          html: emailBody
+        });
+      }
+    } catch (emailErr) {
+      console.error('Error sending inquiry notification email:', emailErr.message);
+    }
+
   } catch (error) {
     console.error('Error creating inquiry:', error.message);
     res.status(500).json({ success: false, message: 'Failed to submit inquiry.', error: error.message });
@@ -927,7 +1041,7 @@ exports.getHomeStats = async (req, res) => {
         (SELECT COUNT(*) FROM academies WHERE deleted = 0 AND status = 'Approved') AS certifiedGurusCount,
         (SELECT COUNT(*) FROM skills WHERE deleted = 0) AS instrumentsCount,
         (SELECT COUNT(*) FROM inquiries WHERE deleted = 0) AS totalInquiriesCount,
-        (SELECT ISNULL(AVG(rating), 4.9) FROM academies WHERE deleted = 0 AND status = 'Approved' AND rating > 0) AS avgRating
+        (SELECT ISNULL(AVG(CAST(rating AS FLOAT)), 4.9) FROM reviews WHERE deleted = 0 AND is_published = 1) AS avgRating
     `);
 
     const stats = statsResult.recordset[0] || {};
@@ -1571,8 +1685,15 @@ exports.deleteGlobalFeature = async (req, res) => {
 
 exports.getPlans = async (req, res) => {
   try {
+    await executeQuery(`
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'subscriptions' AND COLUMN_NAME = 'is_active')
+      BEGIN
+        ALTER TABLE subscriptions ADD is_active BIT NOT NULL DEFAULT 1;
+      END
+    `);
+
     const plansResult = await executeQuery(`
-      SELECT s.id, s.name, s.description, s.price, s.duration_months AS durationMonths, s.features AS rawFeatures
+      SELECT s.id, s.name, s.description, s.price, s.duration_months AS durationMonths, s.features AS rawFeatures, s.is_active
       FROM subscriptions s
       WHERE s.deleted = 0
       ORDER BY s.price ASC
@@ -1619,7 +1740,8 @@ exports.getPlans = async (req, res) => {
           description: plan.description || '',
           price: Number(plan.price || 0),
           durationMonths: Number(plan.durationMonths || 12),
-          features: planFeatures
+          features: planFeatures,
+          is_active: plan.is_active !== undefined ? Boolean(plan.is_active) : true
         };
       });
 
@@ -1647,15 +1769,16 @@ exports.createPlan = async (req, res) => {
     const featuresJsonStr = JSON.stringify(featureList);
 
     const result = await executeQuery(`
-      INSERT INTO subscriptions (name, target_role, price, duration_months, description, features, deleted, created_at, updated_at)
+      INSERT INTO subscriptions (name, target_role, price, duration_months, description, features, is_active, deleted, created_at, updated_at)
       OUTPUT INSERTED.id
-      VALUES (@name, 'academy', @price, @duration_months, @description, @features, 0, GETDATE(), GETDATE())
+      VALUES (@name, 'academy', @price, @duration_months, @description, @features, @is_active, 0, GETDATE(), GETDATE())
     `, [
       { name: 'name', type: sql.VarChar, value: cleanName },
       { name: 'price', type: sql.Decimal, value: cleanPrice },
       { name: 'duration_months', type: sql.Int, value: cleanDuration },
       { name: 'description', type: sql.VarChar, value: description || '' },
-      { name: 'features', type: sql.VarChar, value: featuresJsonStr }
+      { name: 'features', type: sql.VarChar, value: featuresJsonStr },
+      { name: 'is_active', type: sql.Bit, value: req.body.is_active !== undefined ? req.body.is_active : true }
     ]);
 
     const newPlanId = result && result.recordset && result.recordset[0] ? result.recordset[0].id : null;
@@ -1687,7 +1810,8 @@ exports.createPlan = async (req, res) => {
         description: description || '',
         price: cleanPrice,
         durationMonths: cleanDuration,
-        features: featureList
+        features: featureList,
+        is_active: req.body.is_active !== undefined ? req.body.is_active : true
       }
     });
   } catch (error) {
@@ -1712,6 +1836,7 @@ exports.updatePlan = async (req, res) => {
         price = ISNULL(@price, price),
         duration_months = ISNULL(@duration_months, duration_months),
         features = @features,
+        is_active = ISNULL(@is_active, is_active),
         updated_at = GETDATE()
       WHERE deleted = 0 AND (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id)
     `, [
@@ -1720,7 +1845,8 @@ exports.updatePlan = async (req, res) => {
       { name: 'description', type: sql.VarChar, value: description !== undefined ? description : null },
       { name: 'price', type: sql.Decimal, value: price !== undefined ? Number(price) : null },
       { name: 'duration_months', type: sql.Int, value: durationMonths !== undefined ? Number(durationMonths) : null },
-      { name: 'features', type: sql.VarChar, value: featuresJsonStr }
+      { name: 'features', type: sql.VarChar, value: featuresJsonStr },
+      { name: 'is_active', type: sql.Bit, value: req.body.is_active !== undefined ? req.body.is_active : null }
     ]);
 
     if (features !== undefined) {
@@ -1764,3 +1890,616 @@ exports.deletePlan = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to delete pricing plan.', error: error.message });
   }
 };
+
+// -----------------------------------------------------------------------------
+// MOCK CHECKOUT & SUBSCRIPTION LIFECYCLE CONTROLLERS
+// -----------------------------------------------------------------------------
+
+const ensureMockTablesExist = async () => {
+  try {
+    await executeQuery(`
+      IF OBJECT_ID('mock_transactions', 'U') IS NULL
+      BEGIN
+        CREATE TABLE mock_transactions (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          transaction_ref VARCHAR(100) NOT NULL UNIQUE,
+          user_id INT NULL,
+          academy_id INT NULL,
+          subscription_id INT NOT NULL,
+          amount DECIMAL(10, 2) NOT NULL,
+          billing_period_months INT DEFAULT 12,
+          payment_status VARCHAR(20) NOT NULL CHECK (payment_status IN ('SUCCESS', 'FAILED', 'CANCELLED', 'PENDING')),
+          payment_method VARCHAR(50) DEFAULT 'MOCK_CHECKOUT',
+          failure_reason VARCHAR(255) NULL,
+          is_mock BIT NOT NULL DEFAULT 1,
+          created_at DATETIME DEFAULT GETDATE(),
+          updated_at DATETIME DEFAULT GETDATE()
+        );
+      END
+
+      IF OBJECT_ID('subscription_history', 'U') IS NULL
+      BEGIN
+        CREATE TABLE subscription_history (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          user_id INT NULL,
+          academy_id INT NULL,
+          subscription_id INT NOT NULL,
+          action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('ACTIVATED', 'UPGRADED', 'DOWNGRADED', 'CANCELLED', 'EXPIRED')),
+          start_date DATETIME NOT NULL DEFAULT GETDATE(),
+          expiry_date DATETIME NOT NULL,
+          transaction_ref VARCHAR(100) NULL,
+          created_at DATETIME DEFAULT GETDATE()
+        );
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'subscription_plan_name')
+      BEGIN
+        ALTER TABLE academies ADD subscription_plan_name VARCHAR(100) NULL;
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'subscription_status')
+      BEGIN
+        ALTER TABLE academies ADD subscription_status VARCHAR(20) NULL DEFAULT 'Active';
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'subscription_start')
+      BEGIN
+        ALTER TABLE academies ADD subscription_start DATETIME NULL;
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'subscription_expiry')
+      BEGIN
+        ALTER TABLE academies ADD subscription_expiry DATETIME NULL;
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'has_social_media')
+      BEGIN
+        ALTER TABLE academies ADD has_social_media BIT NOT NULL DEFAULT 0;
+      END
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'academies' AND COLUMN_NAME = 'has_google_map')
+      BEGIN
+        ALTER TABLE academies ADD has_google_map BIT NOT NULL DEFAULT 0;
+      END
+    `);
+  } catch (err) {
+    console.warn('Error creating mock tables / altering academies table:', err.message);
+  }
+};
+
+const resolveNumericSubscriptionId = async (planId, planName) => {
+  let numericId = null;
+
+  if (planId !== undefined && planId !== null) {
+    const rawStr = String(planId).trim();
+    const extracted = rawStr.replace(/\D/g, '');
+    if (extracted && !isNaN(parseInt(extracted, 10))) {
+      numericId = parseInt(extracted, 10);
+    }
+  }
+
+  if (!numericId && planName) {
+    const lowerName = String(planName).toLowerCase();
+    if (lowerName.includes('combo') || (lowerName.includes('social') && lowerName.includes('map'))) {
+      numericId = 4;
+    } else if (lowerName.includes('google map') || lowerName.includes('location')) {
+      numericId = 3;
+    } else if (lowerName.includes('social')) {
+      numericId = 2;
+    } else if (lowerName.includes('free')) {
+      numericId = 1;
+    }
+  }
+
+  if (!numericId && planId) {
+    try {
+      const res = await executeQuery(`
+        SELECT TOP 1 id FROM subscriptions
+        WHERE deleted = 0 AND (id = TRY_CAST(@planId AS INT) OR CAST(id AS VARCHAR(100)) = @planId OR LOWER(name) = LOWER(@planId))
+      `, [
+        { name: 'planId', type: sql.VarChar, value: String(planId) }
+      ]);
+      if (res && res.recordset && res.recordset.length > 0) {
+        numericId = res.recordset[0].id;
+      }
+    } catch (e) {
+      console.warn('Error fetching numeric sub ID:', e.message);
+    }
+  }
+
+  return numericId || 1;
+};
+
+const getPlanTier = (planId, planName) => {
+  const pName = String(planName || '').toLowerCase();
+  const rawId = String(planId || '').toLowerCase();
+  if (pName.includes('combo') || (pName.includes('social') && pName.includes('map')) || rawId === '4' || rawId === 'plan-4') return 4;
+  if (pName.includes('google map') || pName.includes('location') || rawId === '3' || rawId === 'plan-3') return 3;
+  if (pName.includes('social') || rawId === '2' || rawId === 'plan-2') return 2;
+  return 1;
+};
+
+const isSubscriptionExpiredCheck = (expiryDate, status) => {
+  if (status && String(status).toLowerCase() === 'expired') return true;
+  if (!expiryDate) return false;
+  if (String(expiryDate).toLowerCase().includes('lifetime')) return false;
+  try {
+    const exp = new Date(expiryDate);
+    if (isNaN(exp.getTime())) return false;
+    exp.setHours(23, 59, 59, 999);
+    return exp.getTime() < Date.now();
+  } catch (e) {
+    return false;
+  }
+};
+
+exports.initiateCheckout = async (req, res) => {
+  try {
+    await ensureMockTablesExist();
+    const { planId, academyId } = req.body;
+
+    if (!planId) {
+      return res.status(400).json({ success: false, message: 'Plan ID is required to initiate checkout.' });
+    }
+
+    const planResult = await executeQuery(`
+      SELECT id, name, description, price, duration_months AS durationMonths, features
+      FROM subscriptions
+      WHERE deleted = 0 AND (id = TRY_CAST(@planId AS INT) OR CAST(id AS VARCHAR(100)) = @planId OR LOWER(name) = LOWER(@planId))
+    `, [
+      { name: 'planId', type: sql.VarChar, value: String(planId) }
+    ]);
+
+    let planData = planResult && planResult.recordset && planResult.recordset[0] ? planResult.recordset[0] : null;
+
+    if (!planData) {
+      const presets = [
+        { id: '1', name: 'Free Plan', price: 0, durationMonths: 12, description: 'Includes basic directory listing and student inquiries.', features: '' },
+        { id: '2', name: 'Social Media Plan', price: 499, durationMonths: 12, description: 'Free Plan features plus Social Media links visible on profile.', features: 'Social Media' },
+        { id: '3', name: 'Google Map Location Plan', price: 999, durationMonths: 12, description: 'Free Plan features plus interactive Google Map Location on profile.', features: 'Google Map Location' },
+        { id: '4', name: 'Social Media & Google Map Plan', price: 1499, durationMonths: 12, description: 'Includes all features: Social Media links & interactive Google Map Location.', features: 'Social Media, Google Map Location' }
+      ];
+      const found = presets.find((p) => p.id === String(planId) || p.name.toLowerCase().includes(String(planId).toLowerCase()));
+      if (found) {
+        planData = found;
+      }
+    }
+
+    if (!planData) {
+      return res.status(404).json({ success: false, message: 'Selected subscription plan not found.' });
+    }
+
+    if (academyId) {
+      const acadRes = await executeQuery(`
+        SELECT subscription_id, subscription_plan_name, subscription_status, subscription_expiry
+        FROM academies
+        WHERE deleted = 0 AND (id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId)
+      `, [{ name: 'acadId', type: sql.VarChar, value: String(academyId) }]);
+
+      if (acadRes && acadRes.recordset && acadRes.recordset.length > 0) {
+        const curAcad = acadRes.recordset[0];
+        const isExp = isSubscriptionExpiredCheck(curAcad.subscription_expiry, curAcad.subscription_status);
+        if (!isExp && (curAcad.subscription_status || 'Active').toLowerCase() === 'active') {
+          const curTier = getPlanTier(curAcad.subscription_id, curAcad.subscription_plan_name);
+          const reqTier = getPlanTier(planData.id, planData.name);
+          if (reqTier < curTier) {
+            return res.status(400).json({
+              success: false,
+              message: `Cannot downgrade to a lower plan (${planData.name}) while your current plan (${curAcad.subscription_plan_name || 'Tier ' + curTier}) is active. Lower plans can only be selected after your current subscription expires.`
+            });
+          }
+        }
+      }
+    }
+
+    const transactionRef = `MOCK-TXN-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const amount = Number(planData.price || 0);
+
+    return res.json({
+      success: true,
+      message: 'Mock checkout initiated.',
+      checkoutSession: {
+        transactionRef,
+        plan: {
+          id: planData.id,
+          name: planData.name,
+          description: planData.description,
+          price: amount,
+          durationMonths: Number(planData.durationMonths || 12)
+        },
+        amount,
+        billingCycle: `${planData.durationMonths || 12} Months`,
+        academyId: academyId || null,
+        isMockMode: true
+      }
+    });
+  } catch (error) {
+    console.error('Error initiating checkout:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to initiate checkout session.', error: error.message });
+  }
+};
+
+exports.confirmCheckout = async (req, res) => {
+  try {
+    await ensureMockTablesExist();
+    const { transactionRef, planId, academyId, status, failureReason } = req.body;
+
+    const mockEnabled = process.env.ENABLE_MOCK_PAYMENT === 'true' || process.env.NODE_ENV !== 'production';
+    if (!mockEnabled) {
+      return res.status(403).json({ success: false, message: 'Mock payment checkout is disabled in production.' });
+    }
+
+    if (!transactionRef || !planId) {
+      return res.status(400).json({ success: false, message: 'Transaction reference and plan ID are required.' });
+    }
+
+    const paymentStatus = (status || 'SUCCESS').toUpperCase();
+
+    const existingTxn = await executeQuery(`
+      SELECT id, payment_status FROM mock_transactions WHERE transaction_ref = @txnRef
+    `, [
+      { name: 'txnRef', type: sql.VarChar, value: String(transactionRef) }
+    ]);
+
+    if (existingTxn && existingTxn.recordset && existingTxn.recordset.length > 0) {
+      const prev = existingTxn.recordset[0];
+      return res.status(409).json({
+        success: false,
+        message: `Transaction ${transactionRef} has already been processed with status ${prev.payment_status}.`,
+        transactionRef,
+        paymentStatus: prev.payment_status
+      });
+    }
+
+    const planResult = await executeQuery(`
+      SELECT id, name, description, price, duration_months AS durationMonths, features
+      FROM subscriptions
+      WHERE deleted = 0 AND (id = TRY_CAST(@planId AS INT) OR CAST(id AS VARCHAR(100)) = @planId OR LOWER(name) = LOWER(@planId))
+    `, [
+      { name: 'planId', type: sql.VarChar, value: String(planId) }
+    ]);
+
+    let planData = planResult && planResult.recordset && planResult.recordset[0] ? planResult.recordset[0] : null;
+
+    if (!planData) {
+      const presets = [
+        { id: '1', name: 'Free Plan', price: 0, durationMonths: 12, description: 'Includes basic directory listing and student inquiries.', features: '' },
+        { id: '2', name: 'Social Media Plan', price: 499, durationMonths: 12, description: 'Free Plan features plus Social Media links visible on profile.', features: 'Social Media' },
+        { id: '3', name: 'Google Map Location Plan', price: 999, durationMonths: 12, description: 'Free Plan features plus interactive Google Map Location on profile.', features: 'Google Map Location' },
+        { id: '4', name: 'Social Media & Google Map Plan', price: 1499, durationMonths: 12, description: 'Includes all features: Social Media links & interactive Google Map Location.', features: 'Social Media, Google Map Location' }
+      ];
+      planData = presets.find((p) => p.id === String(planId) || p.name.toLowerCase().includes(String(planId).toLowerCase())) || presets[0];
+    }
+
+    const amount = Number(planData.price || 0);
+    const durationMonths = Number(planData.durationMonths || 12);
+    const pName = planData.name || 'Free Plan';
+    const hasSocial = pName.toLowerCase().includes('social media');
+    const hasMap = pName.toLowerCase().includes('google map');
+
+    const numericSubId = await resolveNumericSubscriptionId(planData.id || planId, pName);
+
+    // Try to resolve user_id and academy_id
+    let resolvedAcadId = null;
+    let resolvedUserId = req.user?.id || req.body?.userId || null;
+
+    if (academyId) {
+      const acadRes = await executeQuery(`
+        SELECT id, user_id, subscription_id, subscription_plan_name, subscription_status, subscription_expiry FROM academies
+        WHERE deleted = 0 AND (id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId)
+      `, [{ name: 'acadId', type: sql.VarChar, value: String(academyId) }]);
+
+      if (acadRes && acadRes.recordset && acadRes.recordset.length > 0) {
+        resolvedAcadId = acadRes.recordset[0].id;
+        if (!resolvedUserId && acadRes.recordset[0].user_id) {
+          resolvedUserId = acadRes.recordset[0].user_id;
+        }
+
+        // Validate downgrade
+        // Downgrade check removed to allow buying multiple concurrent plans
+      }
+    }
+
+    if (!resolvedAcadId && resolvedUserId) {
+      const acadRes2 = await executeQuery(`
+        SELECT id, subscription_id, subscription_plan_name, subscription_status, subscription_expiry FROM academies WHERE deleted = 0 AND (user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId)
+      `, [{ name: 'uId', type: sql.VarChar, value: String(resolvedUserId) }]);
+      if (acadRes2 && acadRes2.recordset && acadRes2.recordset.length > 0) {
+        resolvedAcadId = acadRes2.recordset[0].id;
+        const curAcad2 = acadRes2.recordset[0];
+        // Downgrade check removed to allow buying multiple concurrent plans
+      }
+    }
+
+    const targetAcadId = resolvedAcadId || (academyId ? String(academyId) : null);
+
+    await executeQuery(`
+      INSERT INTO mock_transactions (transaction_ref, user_id, academy_id, subscription_id, amount, billing_period_months, payment_status, payment_method, failure_reason, is_mock, created_at, updated_at)
+      VALUES (@txnRef, TRY_CAST(@uId AS INT), TRY_CAST(@acadId AS INT), @subId, @amount, @durationMonths, @status, 'MOCK_CHECKOUT', @failReason, 1, GETDATE(), GETDATE())
+    `, [
+      { name: 'txnRef', type: sql.VarChar, value: String(transactionRef) },
+      { name: 'uId', type: sql.VarChar, value: resolvedUserId ? String(resolvedUserId) : null },
+      { name: 'acadId', type: sql.VarChar, value: targetAcadId ? String(targetAcadId) : null },
+      { name: 'subId', type: sql.Int, value: numericSubId },
+      { name: 'amount', type: sql.Decimal, value: amount },
+      { name: 'durationMonths', type: sql.Int, value: durationMonths },
+      { name: 'status', type: sql.VarChar, value: paymentStatus },
+      { name: 'failReason', type: sql.VarChar, value: paymentStatus === 'FAILED' ? (failureReason || 'Simulated payment decline') : null }
+    ]);
+
+    if (paymentStatus === 'SUCCESS') {
+      const isFree = numericSubId === 1 || getPlanTier(numericSubId, pName) === 1;
+      const startDate = new Date();
+      const expiryDate = isFree ? new Date('2099-12-31') : new Date(Date.now() + durationMonths * 30 * 24 * 60 * 60 * 1000);
+      const startStr = startDate.toISOString().split('T')[0];
+      const expiryStr = isFree ? '2099-12-31' : expiryDate.toISOString().split('T')[0];
+
+      // 1. UPDATE ACADEMIES TABLE
+      if (targetAcadId) {
+        await executeQuery(`
+          UPDATE academies
+          SET
+            subscription_id = @subId,
+            subscription_plan_name = CASE 
+               WHEN subscription_plan_name = 'Free Plan' OR subscription_plan_name IS NULL THEN @planName
+               WHEN subscription_plan_name LIKE '%' + @planName + '%' THEN subscription_plan_name
+               ELSE subscription_plan_name + ' & ' + @planName
+            END,
+            subscription_status = 'Active',
+            subscription_start = CASE 
+               WHEN subscription_start IS NULL THEN @startDate 
+               ELSE subscription_start 
+            END,
+            subscription_expiry = CASE 
+               WHEN subscription_expiry IS NOT NULL AND subscription_expiry > @expiryDate THEN subscription_expiry 
+               ELSE @expiryDate 
+            END,
+            has_social_media = CASE WHEN @hasSocial = 1 THEN 1 ELSE has_social_media END,
+            has_google_map = CASE WHEN @hasMap = 1 THEN 1 ELSE has_google_map END,
+            updated_at = GETDATE()
+          WHERE id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId
+        `, [
+          { name: 'acadId', type: sql.VarChar, value: String(targetAcadId) },
+          { name: 'subId', type: sql.Int, value: numericSubId },
+          { name: 'planName', type: sql.VarChar, value: pName },
+          { name: 'startDate', type: sql.VarChar, value: startStr },
+          { name: 'expiryDate', type: sql.VarChar, value: expiryStr },
+          { name: 'hasSocial', type: sql.Bit, value: hasSocial ? 1 : 0 },
+          { name: 'hasMap', type: sql.Bit, value: hasMap ? 1 : 0 }
+        ]);
+      }
+
+      // 2. UPDATE USERS TABLE
+      if (resolvedUserId) {
+        await executeQuery(`
+          UPDATE users
+          SET subscription_id = @subId, updated_at = GETDATE()
+          WHERE id = TRY_CAST(@uId AS INT) OR CAST(id AS VARCHAR(100)) = @uId
+        `, [
+          { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
+          { name: 'subId', type: sql.Int, value: numericSubId }
+        ]);
+
+        // 3. UPDATE/INSERT USER_SUBSCRIPTIONS TABLE
+        const subCheck = await executeQuery(`
+          SELECT id FROM user_subscriptions WHERE user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId
+        `, [{ name: 'uId', type: sql.VarChar, value: String(resolvedUserId) }]);
+
+        if (subCheck && subCheck.recordset && subCheck.recordset.length > 0) {
+          await executeQuery(`
+            UPDATE user_subscriptions
+            SET subscription_id = @subId,
+                start_date = @startDate,
+                expiry_date = @expiryDate,
+                status = 'Active',
+                payment_status = 'Paid',
+                updated_at = GETDATE()
+            WHERE user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId
+          `, [
+            { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
+            { name: 'subId', type: sql.Int, value: numericSubId },
+            { name: 'startDate', type: sql.VarChar, value: startStr },
+            { name: 'expiryDate', type: sql.VarChar, value: expiryStr }
+          ]);
+        } else {
+          await executeQuery(`
+            INSERT INTO user_subscriptions (user_id, subscription_id, start_date, expiry_date, status, payment_status, created_at, updated_at)
+            VALUES (TRY_CAST(@uId AS INT), @subId, @startDate, @expiryDate, 'Active', 'Paid', GETDATE(), GETDATE())
+          `, [
+            { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
+            { name: 'subId', type: sql.Int, value: numericSubId },
+            { name: 'startDate', type: sql.VarChar, value: startStr },
+            { name: 'expiryDate', type: sql.VarChar, value: expiryStr }
+          ]);
+        }
+      }
+
+      // 4. INSERT SUBSCRIPTION HISTORY
+      await executeQuery(`
+        INSERT INTO subscription_history (user_id, academy_id, subscription_id, action_type, start_date, expiry_date, transaction_ref, created_at)
+        VALUES (TRY_CAST(@uId AS INT), TRY_CAST(@acadId AS INT), @subId, 'ACTIVATED', GETDATE(), DATEADD(month, @months, GETDATE()), @txnRef, GETDATE())
+      `, [
+        { name: 'uId', type: sql.VarChar, value: resolvedUserId ? String(resolvedUserId) : null },
+        { name: 'acadId', type: sql.VarChar, value: targetAcadId ? String(targetAcadId) : null },
+        { name: 'subId', type: sql.Int, value: numericSubId },
+        { name: 'months', type: sql.Int, value: durationMonths },
+        { name: 'txnRef', type: sql.VarChar, value: String(transactionRef) }
+      ]);
+
+      return res.json({
+        success: true,
+        message: `Payment successful! Upgraded to ${pName} (Subscription ID: ${numericSubId}).`,
+        transactionRef,
+        paymentStatus: 'SUCCESS',
+        subscription: {
+          planId: numericSubId,
+          planName: pName,
+          price: amount,
+          status: 'Active',
+          startDate: startStr,
+          expiryDate: expiryStr,
+          hasSocialMedia: hasSocial,
+          hasGoogleMap: hasMap
+        }
+      });
+    } else if (paymentStatus === 'FAILED') {
+      return res.json({
+        success: false,
+        message: failureReason || 'Simulated payment failed (card declined / insufficient test funds).',
+        transactionRef,
+        paymentStatus: 'FAILED'
+      });
+    } else {
+      return res.json({
+        success: false,
+        message: 'Mock payment checkout session was cancelled by user.',
+        transactionRef,
+        paymentStatus: 'CANCELLED'
+      });
+    }
+  } catch (error) {
+    console.error('Error confirming checkout:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to confirm checkout.', error: error.message });
+  }
+};
+
+exports.getCurrentSubscription = async (req, res) => {
+  try {
+    await ensureMockTablesExist();
+    const { academyId } = req.query;
+
+    if (!academyId) {
+      return res.status(400).json({ success: false, message: 'Academy ID is required.' });
+    }
+
+    const academyResult = await executeQuery(`
+      SELECT id, academy_name AS academyName, subscription_id AS subscriptionPlanId, subscription_plan_name AS subscriptionPlanName, subscription_status AS subscriptionStatus, subscription_start AS subscriptionStart, subscription_expiry AS subscriptionExpiry, has_social_media AS hasSocialMedia, has_google_map AS hasGoogleMap
+      FROM academies
+      WHERE deleted = 0 AND (id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId)
+    `, [
+      { name: 'acadId', type: sql.VarChar, value: String(academyId) }
+    ]);
+
+    const acad = academyResult && academyResult.recordset && academyResult.recordset[0] ? academyResult.recordset[0] : null;
+
+    const txnsResult = await executeQuery(`
+      SELECT transaction_ref AS transactionRef, amount, billing_period_months AS billingPeriodMonths, payment_status AS paymentStatus, payment_method AS paymentMethod, failure_reason AS failureReason, created_at AS createdAt
+      FROM mock_transactions
+      WHERE academy_id = TRY_CAST(@acadId AS INT) OR CAST(academy_id AS VARCHAR(100)) = @acadId
+      ORDER BY created_at DESC
+    `, [
+      { name: 'acadId', type: sql.VarChar, value: String(academyId) }
+    ]);
+
+    const transactions = txnsResult && txnsResult.recordset ? txnsResult.recordset : [];
+
+    return res.json({
+      success: true,
+      data: {
+        academy: acad,
+        transactions
+      }
+    });
+  } catch (error) {
+    console.error('Error getting current subscription:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to retrieve subscription info.', error: error.message });
+  }
+};
+
+exports.cancelSubscription = async (req, res) => {
+  try {
+    await ensureMockTablesExist();
+    const { academyId } = req.body;
+
+    if (!academyId) {
+      return res.status(400).json({ success: false, message: 'Academy ID is required to cancel subscription.' });
+    }
+
+    const acadOwnerRes = await executeQuery(`
+      SELECT user_id FROM academies WHERE deleted = 0 AND (id = TRY_CAST(@id AS INT) OR CAST(id AS VARCHAR(100)) = @id OR slug = @id)
+    `, [{ name: 'id', type: sql.VarChar, value: String(academyId) }]);
+
+    const uId = acadOwnerRes?.recordset?.[0]?.user_id || null;
+
+    await executeQuery(`
+      UPDATE academies
+      SET
+        subscription_id = 1,
+        subscription_plan_name = 'Free Plan',
+        subscription_status = 'Disabled',
+        has_social_media = 0,
+        has_google_map = 0,
+        updated_at = GETDATE()
+      WHERE id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId
+    `, [
+      { name: 'acadId', type: sql.VarChar, value: String(academyId) }
+    ]);
+
+    if (uId) {
+      await executeQuery(`
+        UPDATE users SET subscription_id = 1, updated_at = GETDATE()
+        WHERE id = TRY_CAST(@uId AS INT) OR CAST(id AS VARCHAR(100)) = @uId
+      `, [{ name: 'uId', type: sql.VarChar, value: String(uId) }]);
+
+      await executeQuery(`
+        UPDATE user_subscriptions SET status = 'Cancelled', updated_at = GETDATE()
+        WHERE user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId
+      `, [{ name: 'uId', type: sql.VarChar, value: String(uId) }]);
+    }
+
+    await executeQuery(`
+      INSERT INTO subscription_history (user_id, academy_id, subscription_id, action_type, start_date, expiry_date, created_at)
+      VALUES (TRY_CAST(@uId AS INT), TRY_CAST(@acadId AS INT), 1, 'CANCELLED', GETDATE(), GETDATE(), GETDATE())
+    `, [
+      { name: 'uId', type: sql.VarChar, value: uId ? String(uId) : null },
+      { name: 'acadId', type: sql.VarChar, value: String(academyId) }
+    ]);
+
+    return res.json({ success: true, message: 'Subscription cancelled successfully. Reverted to Free Plan.' });
+  } catch (error) {
+    console.error('Error cancelling subscription:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to cancel subscription.', error: error.message });
+  }
+};
+
+exports.getReviews = async (req, res) => {
+  try {
+    const result = await executeQuery(`
+      SELECT id, student_name AS userName, rating, comment, FORMAT(created_at, 'MMM dd, yyyy') AS date, academy_id AS academyId, 'Approved' AS status
+      FROM reviews
+      ORDER BY created_at DESC
+    `);
+    res.json({ success: true, data: result.recordset || [] });
+  } catch (error) {
+    console.error('Error fetching reviews:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to fetch reviews.', error: error.message });
+  }
+};
+
+exports.createReview = async (req, res) => {
+  try {
+    const { userName, rating, comment, academyId, userId } = req.body;
+    if (!userName || !rating || !academyId) {
+      return res.status(400).json({ success: false, message: 'Missing required fields.' });
+    }
+
+    const result = await executeQuery(`
+      INSERT INTO reviews (student_name, rating, comment, academy_id, user_id, created_at, updated_at)
+      OUTPUT INSERTED.id, INSERTED.student_name AS userName, INSERTED.rating, INSERTED.comment, FORMAT(INSERTED.created_at, 'MMM dd, yyyy') AS date, INSERTED.academy_id AS academyId, 'Approved' AS status
+      VALUES (@userName, @rating, @comment, TRY_CAST(@academyId AS INT), TRY_CAST(@userId AS INT), GETDATE(), GETDATE())
+    `, [
+      { name: 'userName', type: sql.VarChar, value: userName },
+      { name: 'rating', type: sql.Int, value: Number(rating) },
+      { name: 'comment', type: sql.VarChar, value: comment || '' },
+      { name: 'academyId', type: sql.VarChar, value: String(academyId) },
+      { name: 'userId', type: sql.VarChar, value: userId ? String(userId) : null }
+    ]);
+
+    const newReview = result.recordset[0];
+    res.status(201).json({ success: true, message: 'Review created successfully.', data: newReview });
+  } catch (error) {
+    console.error('Error creating review:', error.message);
+    res.status(500).json({ success: false, message: 'Failed to create review.', error: error.message });
+  }
+};
+

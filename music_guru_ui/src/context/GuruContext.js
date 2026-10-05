@@ -63,6 +63,7 @@ export const GuruProvider = ({ children }) => {
   ];
 
   const [cities, setCities] = useState([]);
+  const [staticPagesData, setStaticPagesData] = useState(null);
   const [skills, setSkills] = useState([]);
   const [features, setFeatures] = useState([]);
   const [globalFeatures, setGlobalFeatures] = useState([]);
@@ -71,6 +72,21 @@ export const GuruProvider = ({ children }) => {
   const [inquiries, setInquiries] = useState([]);
   const [raidLogs, setRaidLogs] = useState([]);
   const [reviews, setReviews] = useState([]);
+
+  useEffect(() => {
+    const fetchStaticPages = async () => {
+      try {
+        const res = await fetch('http://localhost:5001/api/static-pages');
+        const json = await res.json();
+        if (json.success) {
+          setStaticPagesData(json.data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch static pages', e);
+      }
+    };
+    fetchStaticPages();
+  }, []);
 
   const [searchFilters, setSearchFilters] = useState({
     query: '',
@@ -130,7 +146,7 @@ export const GuruProvider = ({ children }) => {
   useEffect(() => {
     const loadBackendData = async () => {
       try {
-        const [liveAcademies, liveCities, liveSkills, liveFeatures, liveGlobalFeatures, livePlans, liveStats, liveInquiries] = await Promise.all([
+        const [liveAcademies, liveCities, liveSkills, liveFeatures, liveGlobalFeatures, livePlans, liveStats, liveInquiries, liveReviews] = await Promise.all([
           guruService.fetchAllAcademies(),
           guruService.fetchCities(),
           guruService.fetchSkills(),
@@ -138,7 +154,8 @@ export const GuruProvider = ({ children }) => {
           guruService.fetchGlobalFeatures(),
           guruService.fetchPlans(),
           guruService.fetchHomeStats(),
-          guruService.fetchInquiries()
+          guruService.fetchInquiries(),
+          guruService.fetchReviews()
         ]);
 
         if (liveAcademies && Array.isArray(liveAcademies)) {
@@ -176,6 +193,9 @@ export const GuruProvider = ({ children }) => {
         }
         if (liveInquiries && Array.isArray(liveInquiries)) {
           setInquiries(liveInquiries);
+        }
+        if (liveReviews && Array.isArray(liveReviews)) {
+          setReviews(liveReviews);
         }
       } catch (err) {
         console.warn('Error loading backend data:', err);
@@ -348,7 +368,10 @@ export const GuruProvider = ({ children }) => {
         studentEmail: inquiryData.email || inquiryData.studentEmail,
         studentPhone: inquiryData.mobile || inquiryData.studentPhone,
         preferredSlot: inquiryData.mode || inquiryData.preferredSlot || 'Offline',
-        message: inquiryData.message
+        message: inquiryData.message,
+        state: inquiryData.state,
+        city: inquiryData.city,
+        area: inquiryData.area
       });
     } catch (err) {
       console.warn('Failed to submit inquiry to backend API:', err);
@@ -626,25 +649,26 @@ export const GuruProvider = ({ children }) => {
     setRaidLogs((prev) => prev.map((r) => (r.id === raidId ? { ...r, status } : r)));
   };
 
-  const addReview = (reviewData) => {
-    const newRev = {
-      id: `rev-${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
-      status: 'Approved',
-      ...reviewData
-    };
-    setReviews((prev) => [newRev, ...prev]);
+  const addReview = async (reviewData) => {
+    try {
+      const createdReview = await guruService.createReview(reviewData);
+      if (createdReview) {
+        setReviews((prev) => [createdReview, ...prev]);
 
-    const acadReviews = [...reviews.filter((r) => r.academyId === reviewData.academyId), newRev];
-    const avg = acadReviews.reduce((sum, r) => sum + r.rating, 0) / acadReviews.length;
-
-    setAcademies((prev) =>
-      prev.map((acc) =>
-        acc.id === reviewData.academyId
-          ? { ...acc, rating: parseFloat(avg.toFixed(1)), reviewCount: acadReviews.length }
-          : acc
-      )
-    );
+        const acadReviews = [...reviews.filter((r) => r.academyId === reviewData.academyId), createdReview];
+        const avg = acadReviews.reduce((sum, r) => sum + r.rating, 0) / acadReviews.length;
+        
+        setAcademies((prev) =>
+          prev.map((acc) =>
+            acc.id === reviewData.academyId
+              ? { ...acc, rating: parseFloat(avg.toFixed(1)), reviewCount: acadReviews.length }
+              : acc
+          )
+        );
+      }
+    } catch (err) {
+      console.warn('Failed to submit review to backend:', err);
+    }
   };
 
   const exportDataToCSV = (filename, dataArray) => {
@@ -754,6 +778,16 @@ export const GuruProvider = ({ children }) => {
     return false;
   };
 
+  const checkLeadContactAccess = (academy) => {
+    if (!academy) return false;
+    if (Array.isArray(academy.planFeatures)) {
+      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('student contact') || String(f).toLowerCase().includes('contacts'))) return true;
+    }
+    const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
+    if (pName.includes('view contacts') || pName.includes('all-in-one') || pName.includes('premium')) return true;
+    return false;
+  };
+
   const isGlobalFeatureActive = (featureName) => {
     if (!featureName) return true;
     const searchName = String(featureName).toLowerCase().trim();
@@ -781,6 +815,7 @@ export const GuruProvider = ({ children }) => {
         currentUser,
         setCurrentUser,
         cities,
+        staticPagesData,
         skills,
         features,
         globalFeatures,
@@ -821,6 +856,7 @@ export const GuruProvider = ({ children }) => {
         checkSocialMediaAccess,
         checkSendInquiryAccess,
         checkGoogleMapAccess,
+        checkLeadContactAccess,
         isGlobalFeatureActive
       }}
     >

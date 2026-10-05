@@ -9,6 +9,12 @@ import ClassAdminDashboard from './components/findmyguru/ClassAdminDashboard';
 import SuperAdminDashboard from './components/findmyguru/SuperAdminDashboard';
 import LoginPage from './components/findmyguru/LoginPage';
 import RegisterPage from './components/findmyguru/RegisterPage';
+import AboutUsPage from './components/findmyguru/AboutUsPage';
+import ContactUsPage from './components/findmyguru/ContactUsPage';
+import TermsConditionsPage from './components/findmyguru/TermsConditionsPage';
+import PrivacyPolicyPage from './components/findmyguru/PrivacyPolicyPage';
+import HelpSupportPage from './components/findmyguru/HelpSupportPage';
+import StudentFaqsPage from './components/findmyguru/StudentFaqsPage';
 
 const ProtectedRoute = ({ allowedRoles, children }) => {
   const { currentUser, currentRole } = useGuru();
@@ -61,6 +67,12 @@ function App() {
           />
           <Route path={ROUTES.LOGIN} element={<LoginPage />} />
           <Route path={ROUTES.REGISTER} element={<RegisterPage />} />
+          <Route path={ROUTES.ABOUT} element={<AboutUsPage />} />
+          <Route path={ROUTES.CONTACT} element={<ContactUsPage />} />
+          <Route path={ROUTES.TERMS} element={<TermsConditionsPage />} />
+          <Route path={ROUTES.PRIVACY} element={<PrivacyPolicyPage />} />
+          <Route path={ROUTES.SUPPORT} element={<HelpSupportPage />} />
+          <Route path={ROUTES.FAQS} element={<StudentFaqsPage />} />
         </Routes>
       </Router>
     </GuruProvider>

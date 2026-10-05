@@ -6,7 +6,13 @@ const ROUTES = {
   CLASS_ADMIN: '/class-admin',
   SUPER_ADMIN: '/super-admin',
   LOGIN: '/login',
-  REGISTER: '/register'
+  REGISTER: '/register',
+  ABOUT: '/about',
+  CONTACT: '/contact',
+  TERMS: '/terms-conditions',
+  PRIVACY: '/privacy-policy',
+  SUPPORT: '/support',
+  FAQS: '/faqs'
 };
 
 export default ROUTES;

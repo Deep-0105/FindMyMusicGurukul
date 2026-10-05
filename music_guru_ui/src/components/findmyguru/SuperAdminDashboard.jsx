@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useGuru } from '../../context/GuruContext';
 import { getSkillIcon } from '../../utils/skillIcons';
 import GuruNavbar from './GuruNavbar';
@@ -18,8 +18,12 @@ import {
   Download,
   X,
   Sparkles,
-  Check
+  Check,
+  Save,
+  FileText
 } from 'lucide-react';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 
 const PRESET_ICONS = [
   '🎸', '🎹', '🎤', '🎙️', '🥁', '🎻', '🪈', '🪗', '🎼', '🎵',
@@ -64,11 +68,39 @@ const SuperAdminDashboard = () => {
     updateRaidLogStatus,
     inquiries,
     cities,
-    exportDataToCSV
+    exportDataToCSV,
+    updatePlanStatus
   } = useGuru();
 
   const [activeTab, setActiveTab] = useState('approvals');
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Static Pages State
+  const [staticPagesData, setStaticPagesData] = useState({});
+  const [selectedStaticPage, setSelectedStaticPage] = useState('aboutUs');
+
+  useEffect(() => {
+    // Fetch static pages data
+    const fetchStaticPages = async () => {
+      try {
+        const res = await fetch('http://localhost:5001/api/static-pages');
+        const result = await res.json();
+        if (result.success) {
+          setStaticPagesData(result.data);
+        }
+      } catch (err) {
+        console.error('Error fetching static pages:', err);
+      }
+    };
+    fetchStaticPages();
+  }, []);
+
+  const handleStaticPageContentChange = (content) => {
+    setStaticPagesData(prev => ({
+      ...prev,
+      [selectedStaticPage]: content
+    }));
+  };
 
   const handleActionWithLoader = (actionFn, message = 'Processing Request...') => {
     setIsProcessing(true);
@@ -173,7 +205,8 @@ const SuperAdminDashboard = () => {
     description: '',
     price: 999,
     durationMonths: 12,
-    selectedFeatures: ['Send Enquiry', 'Social Media visible']
+    selectedFeatures: ['Send Enquiry', 'Social Media visible'],
+    is_active: true
   });
   const togglePlanFeature = (featName) => {
     setPlanForm((prev) => {
@@ -222,7 +255,8 @@ const SuperAdminDashboard = () => {
         description: planForm.description,
         price: Number(planForm.price),
         durationMonths: Number(planForm.durationMonths),
-        features: finalFeatures
+        features: finalFeatures,
+        is_active: planForm.is_active
       });
     } else {
       addPlan({
@@ -230,7 +264,8 @@ const SuperAdminDashboard = () => {
         description: planForm.description,
         price: Number(planForm.price),
         durationMonths: Number(planForm.durationMonths),
-        features: finalFeatures
+        features: finalFeatures,
+        is_active: planForm.is_active
       });
     }
     setIsPlanModalOpen(false);
@@ -244,9 +279,24 @@ const SuperAdminDashboard = () => {
       description: plan.description || '',
       price: plan.price,
       durationMonths: plan.durationMonths,
-      selectedFeatures: Array.isArray(plan.features) ? [...plan.features] : []
+      selectedFeatures: Array.isArray(plan.features) ? [...plan.features] : [],
+      is_active: plan.is_active !== undefined ? plan.is_active : (plan.isActive !== undefined ? plan.isActive : true)
     });
     setIsPlanModalOpen(true);
+  };
+
+  const handleTogglePlanActive = (pl) => {
+    const currentActive = pl.is_active !== undefined ? pl.is_active : (pl.isActive !== undefined ? pl.isActive : true);
+    const nextActive = !currentActive;
+    if (updatePlanStatus) {
+      updatePlanStatus(pl.id, nextActive);
+    } else {
+      updatePlan(pl.id, {
+        ...pl,
+        is_active: nextActive,
+        isActive: nextActive
+      });
+    }
   };
 
   const handleRaidSubmit = (e) => {
@@ -436,6 +486,17 @@ const SuperAdminDashboard = () => {
           >
             <TrendingUp className="w-4 h-4" />
             <span>P&L & Download Reports</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('static_content')}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center space-x-1.5 ${activeTab === 'static_content'
+                ? 'bg-pink-600 text-white shadow-md'
+                : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+              }`}
+          >
+            <Edit2 className="w-4 h-4" />
+            <span>Static Pages Editor</span>
           </button>
         </div>
 
@@ -640,7 +701,7 @@ const SuperAdminDashboard = () => {
               <button
                 onClick={() => {
                   setEditingPlanId(null);
-                  setPlanForm({ name: '', description: '', price: 999, durationMonths: 12, listingPriority: 'Normal', maxImages: 10, featuresStr: '' });
+                  setPlanForm({ name: '', description: '', price: 999, durationMonths: 12, listingPriority: 'Normal', maxImages: 10, featuresStr: '', selectedFeatures: [], is_active: true });
                   setIsPlanModalOpen(true);
                 }}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow flex items-center space-x-1"
@@ -651,42 +712,78 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {(plans || []).map((pl) => (
-                <div key={pl.id} className="p-6 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
-                  <div className="space-y-2">
-                    <h4 className="text-xl font-bold text-gray-900">{pl.name}</h4>
-                    <p className="text-xs text-gray-600">{pl.description || ''}</p>
-                    <div className="text-3xl font-black text-gray-900 py-2">
-                      ₹{pl.price} <span className="text-xs font-semibold text-gray-500">/ {pl.durationMonths || 12} Months</span>
+              {(plans || []).map((pl) => {
+                const isActiveInAcademies = (academies || []).some(a => String(a.subscriptionPlanId) === String(pl.id));
+                const isPlanActive = pl.is_active !== undefined ? pl.is_active : (pl.isActive !== undefined ? pl.isActive : true);
+                
+                return (
+                  <div key={pl.id} className={`p-6 rounded-2xl border flex flex-col justify-between space-y-4 ${isPlanActive ? 'bg-slate-50 border-slate-200' : 'bg-gray-100/70 border-gray-200 opacity-75'}`}>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xl font-bold text-gray-900">{pl.name}</h4>
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${isPlanActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                          {isPlanActive ? 'Active' : 'Off'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600">{pl.description || ''}</p>
+                      <div className="text-3xl font-black text-gray-900 py-2">
+                        ₹{pl.price} <span className="text-xs font-semibold text-gray-500">/ {pl.durationMonths || 12} Months</span>
+                      </div>
+
+                      <ul className="space-y-1 text-xs text-gray-700 pt-2 border-t border-slate-200">
+                        {(Array.isArray(pl.features) ? pl.features : []).map((feat, i) => (
+                          <li key={i} className="flex items-center space-x-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span>{feat}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {isActiveInAcademies && (
+                        <div className="mt-2 text-[10px] text-amber-700 font-bold flex items-center gap-1 bg-amber-50 p-2 rounded-lg border border-amber-200">
+                          <AlertTriangle className="w-3 h-3" />
+                          Plan is active for users. Edit/Delete disabled.
+                        </div>
+                      )}
                     </div>
 
-                    <ul className="space-y-1 text-xs text-gray-700 pt-2 border-t border-slate-200">
-                      {(Array.isArray(pl.features) ? pl.features : []).map((feat, i) => (
-                        <li key={i} className="flex items-center space-x-1.5">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                          <span>{feat}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                    <div className="flex items-center space-x-2 pt-4 border-t border-slate-200">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={isPlanActive}
+                        onClick={() => handleTogglePlanActive(pl)}
+                        title={isPlanActive ? 'Turn off plan' : 'Turn on plan'}
+                        className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                          isPlanActive ? 'bg-emerald-500' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            isPlanActive ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
 
-                  <div className="flex items-center space-x-2 pt-4 border-t border-slate-200">
-                    <button
-                      onClick={() => handleOpenEditPlan(pl)}
-                      className="flex-1 bg-white hover:bg-gray-100 text-gray-800 font-bold text-xs py-2 rounded-xl border border-gray-300 flex items-center justify-center space-x-1"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
-                    <button
-                      onClick={() => deletePlan(pl.id)}
-                      className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl border border-rose-200"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      <button
+                        onClick={() => handleOpenEditPlan(pl)}
+                        disabled={isActiveInAcademies}
+                        className={`flex-1 bg-white text-gray-800 font-bold text-xs py-2 rounded-xl border border-gray-300 flex items-center justify-center space-x-1 ${isActiveInAcademies ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'}`}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Edit</span>
+                      </button>
+                      <button
+                        onClick={() => deletePlan(pl.id)}
+                        disabled={isActiveInAcademies}
+                        className={`p-2 rounded-xl border flex items-center justify-center ${isActiveInAcademies ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200'}`}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -887,6 +984,102 @@ const SuperAdminDashboard = () => {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        )}
+        {activeTab === 'static_content' && (
+          <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-100">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">Static Pages Content Editor</h3>
+                <p className="text-xs text-gray-500">Edit the content of About Us, Contact Us, FAQs, Privacy Policy, and Terms & Conditions directly using a Rich Text Editor.</p>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <select
+                  value={selectedStaticPage}
+                  onChange={(e) => setSelectedStaticPage(e.target.value)}
+                  className="px-4 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm font-semibold text-gray-800 focus:outline-none focus:border-pink-500"
+                >
+                  <option value="aboutUs">About Us</option>
+                  <option value="contactUs">Contact Us</option>
+                  <option value="helpSupport">Help & Support</option>
+                  <option value="faqs">FAQs</option>
+                  <option value="termsConditions">Terms & Conditions</option>
+                  <option value="privacyPolicy">Privacy Policy</option>
+                </select>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      handleActionWithLoader(async () => {
+                        const token = localStorage.getItem('music_guru_auth_token');
+                        const res = await fetch('http://localhost:5001/api/static-pages', {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`
+                          },
+                          body: JSON.stringify(staticPagesData)
+                        });
+                        if (res.ok) alert('Successfully updated static pages!');
+                        else alert('Failed to update static pages.');
+                      }, 'Saving Static Content...');
+                    } catch (e) {
+                      alert('Error saving data.');
+                    }
+                  }}
+                  className="bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs px-6 py-2.5 rounded-xl shadow flex items-center space-x-1"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save All Changes</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-bold text-gray-700">Page Content Editor</label>
+                <span className="text-[10px] text-gray-500 bg-gray-100 px-2 py-1 rounded">Editing: {selectedStaticPage}</span>
+              </div>
+              
+              <style>{`
+                .quill-custom-container .ql-container {
+                  height: 500px !important;
+                  overflow-y: auto;
+                  font-size: 14px;
+                  font-family: inherit;
+                }
+                .quill-custom-container .ql-editor {
+                  min-height: 100%;
+                }
+              `}</style>
+
+              <div className="bg-white border-2 border-gray-100 rounded-xl overflow-hidden quill-custom-container">
+                <ReactQuill 
+                  key={selectedStaticPage}
+                  theme="snow"
+                  value={staticPagesData[selectedStaticPage] || ''}
+                  onChange={(content, delta, source) => {
+                    if (source === 'user') {
+                      handleStaticPageContentChange(content);
+                    }
+                  }}
+                  modules={{
+                    toolbar: [
+                      [{ 'header': [1, 2, 3, 4, 5, 6, false] }],
+                      [{ 'font': [] }],
+                      [{ 'size': ['small', false, 'large', 'huge'] }],
+                      ['bold', 'italic', 'underline', 'strike'],
+                      [{ 'color': [] }, { 'background': [] }],
+                      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                      [{ 'align': [] }],
+                      ['link', 'image', 'video'],
+                      ['clean']
+                    ]
+                  }}
+                />
               </div>
             </div>
           </div>

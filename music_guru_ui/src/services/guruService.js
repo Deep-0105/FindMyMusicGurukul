@@ -291,6 +291,96 @@ export const guruService = {
       console.warn('Failed to fetch academy approvals from backend:', err);
       return [];
     }
+  },
+
+  initiateCheckout: async (planId, academyId) => {
+    try {
+      const response = await guruApi.initiateCheckout({ planId, academyId });
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to initiate checkout on backend:', err);
+      return null;
+    }
+  },
+
+  confirmCheckout: async (payload) => {
+    try {
+      const response = await guruApi.confirmCheckout(payload);
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to confirm checkout on backend:', err);
+      return { success: false, message: err.message || err.response?.data?.message || 'Payment processing failed.' };
+    }
+  },
+
+  createRazorpayOrder: async (planId, academyId) => {
+    try {
+      const response = await guruApi.createRazorpayOrder({ planId, academyId });
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to create Razorpay order on backend:', err);
+      return null;
+    }
+  },
+
+  verifyRazorpayPayment: async (payload) => {
+    try {
+      const response = await guruApi.verifyRazorpayPayment(payload);
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to verify Razorpay payment on backend:', err);
+      return { success: false, message: err.response?.data?.message || err.message || 'Verification failed.' };
+    }
+  },
+
+  fetchPaymentHistory: async (params = {}) => {
+    try {
+      const response = await guruApi.getPaymentHistory(params);
+      return response.data || response || [];
+    } catch (err) {
+      console.warn('Failed to fetch payment history from backend:', err);
+      return [];
+    }
+  },
+
+  fetchCurrentSubscription: async (academyId) => {
+    try {
+      const response = await guruApi.getCurrentSubscription(academyId);
+      return response.data || response;
+    } catch (err) {
+      console.warn(`Failed to fetch current subscription for academy ${academyId}:`, err);
+      return null;
+    }
+  },
+
+  cancelSubscription: async (academyId) => {
+    try {
+      const response = await guruApi.cancelSubscription(academyId);
+      return response.data || response;
+    } catch (err) {
+      console.warn(`Failed to cancel subscription for academy ${academyId}:`, err);
+      return null;
+    }
+  },
+
+  fetchReviews: async () => {
+    try {
+      const response = await guruApi.getReviews();
+      return response.data || response || [];
+    } catch (err) {
+      console.warn('Failed to fetch reviews from backend:', err);
+      return [];
+    }
+  },
+
+  createReview: async (reviewData) => {
+    try {
+      const response = await guruApi.addReview(reviewData);
+      return response.data || response;
+    } catch (err) {
+      console.warn('Failed to create review on backend:', err);
+      return null;
+    }
   }
 };
 

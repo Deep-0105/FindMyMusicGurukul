@@ -15,7 +15,9 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
     email: '',
     skill: '',
     mode: 'Offline',
-    preferredArea: '',
+    state: '',
+    city: '',
+    area: '',
     message: ''
   });
 
@@ -53,7 +55,9 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
         email: '',
         skill: preselectedSkill || (academy?.skills?.[0] || 'Guitar'),
         mode: academy?.teachingMode?.[0] || 'Offline',
-        preferredArea: academy?.area || '',
+        state: '',
+        city: '',
+        area: '',
         message: ''
       });
     }
@@ -119,8 +123,8 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
       {loading && <LoaderSpinner fullPage text="Sending Inquiry to Guru..." />}
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-gray-100 relative">
-        <div className="bg-gradient-to-r from-rose-600 via-purple-600 to-indigo-700 p-6 text-white relative">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-100 relative">
+        <div className="bg-gradient-to-r from-rose-600 via-purple-600 to-indigo-700 p-5 text-white relative">
           <button
             onClick={handleReset}
             className="absolute top-4 right-4 text-white/80 hover:text-white bg-white/10 hover:bg-white/20 p-1.5 rounded-full transition-colors"
@@ -158,7 +162,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
             </button>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <form onSubmit={handleSubmit} className="p-5 space-y-3">
             <div>
               <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
                 Your Full Name <span className="text-rose-500">*</span>
@@ -171,7 +175,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
                   placeholder="e.g. Rahul Deshmukh"
                   value={formData.studentName}
                   onChange={(e) => setFormData({ ...formData, studentName: e.target.value })}
-                  className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                  className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
                 />
               </div>
             </div>
@@ -190,7 +194,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
                     placeholder="10-digit phone number"
                     value={formData.mobile}
                     onChange={handleMobileChange}
-                    className={`w-full pl-9 pr-3 py-2.5 bg-gray-50 border ${
+                    className={`w-full pl-9 pr-3 py-2 bg-gray-50 border ${
                       phoneError ? 'border-rose-500 ring-1 ring-rose-500' : 'border-gray-300'
                     } rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none`}
                   />
@@ -213,7 +217,55 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
                     placeholder="student@example.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                  State
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    placeholder="e.g. Maharashtra"
+                    value={formData.state}
+                    onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                  City
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    placeholder="e.g. Pune"
+                    value={formData.city}
+                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+                  Area
+                </label>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    placeholder="e.g. Wakad"
+                    value={formData.area}
+                    onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
                   />
                 </div>
               </div>
@@ -229,7 +281,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
                   <select
                     value={formData.skill}
                     onChange={(e) => setFormData({ ...formData, skill: e.target.value })}
-                    className="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                    className="w-full pl-9 pr-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
                   >
                     {academy.skills.map((sk) => (
                       <option key={sk} value={sk}>
@@ -247,7 +299,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
                 <select
                   value={formData.mode}
                   onChange={(e) => setFormData({ ...formData, mode: e.target.value })}
-                  className="w-full px-3 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm focus:bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500 transition-all outline-none"
                 >
                   {academy.teachingMode.map((mode) => (
                     <option key={mode} value={mode}>
@@ -265,7 +317,7 @@ const InquiryModal = ({ isOpen, onClose, academy, preselectedSkill }) => {
               <div className="relative">
                 <MessageSquare className="w-4 h-4 text-gray-400 absolute left-3 top-3" />
                 <textarea
-                  rows={3}
+                  rows={2}
                   placeholder="Ask about batch timings, fees, or course structure..."
                   value={formData.message}
                   onChange={(e) => setFormData({ ...formData, message: e.target.value })}

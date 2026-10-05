@@ -30,7 +30,7 @@ import {
 
 const GuruProfilePage = () => {
   const { slug } = useParams();
-  const { academies, reviews, addReview, currentRole, checkSocialMediaAccess, checkSendInquiryAccess, checkGoogleMapAccess, isGlobalFeatureActive } = useGuru();
+  const { academies, reviews, addReview, currentRole, currentUser, activeAcademyId, checkSocialMediaAccess, checkSendInquiryAccess, checkGoogleMapAccess, isGlobalFeatureActive, plans } = useGuru();
 
   const isEnquiryActive = isGlobalFeatureActive('Send Inquiry');
   const showSendEnquiryButton = isEnquiryActive || currentRole === 'SUPER_ADMIN';
@@ -42,9 +42,10 @@ const GuruProfilePage = () => {
 
   const [newReview, setNewReview] = useState({
     userName: '',
-    rating: 5,
-    comment: ''
+    rating: 5
   });
+
+  const googleMapPlan = plans?.find((p) => p.name === 'Google Map Location Plan' || String(p.id) === '3' || String(p.id) === 'plan-3') || { name: 'Google Map Location Plan', price: 999 };
 
   useEffect(() => {
     let isMounted = true;
@@ -74,6 +75,17 @@ const GuruProfilePage = () => {
   const hasSocialAccess = checkSocialMediaAccess ? checkSocialMediaAccess(academy) : (academy.hasSocialMedia !== false);
   const hasInquiryAccess = checkSendInquiryAccess ? checkSendInquiryAccess(academy) : true;
   const hasGoogleMapAccess = checkGoogleMapAccess ? checkGoogleMapAccess(academy) : (academy.hasGoogleMap !== false);
+
+  const isSuperAdminUser = currentRole === 'SUPER_ADMIN' || (currentUser && currentUser.role === 'superadmin');
+  const isAcademyOwner =
+    Boolean(currentUser) &&
+    (
+      activeAcademyId === academy.id ||
+      currentUser.academyId === academy.id ||
+      (currentUser.email && academy.email && currentUser.email.toLowerCase().trim() === academy.email.toLowerCase().trim()) ||
+      (currentUser.phone && academy.phone && String(currentUser.phone).replace(/\D/g, '') === String(academy.phone).replace(/\D/g, ''))
+    );
+  const canSeeLockedBanners = isSuperAdminUser || isAcademyOwner;
 
   const getSocialLinks = (acad) => {
     if (!acad) return {};
@@ -106,17 +118,17 @@ const GuruProfilePage = () => {
 
   const academyReviews = reviews.filter((r) => r.academyId === academy.id && r.status === 'Approved');
 
-  const handleReviewSubmit = (e) => {
+  const handleReviewSubmit = async (e) => {
     e.preventDefault();
-    if (!newReview.userName || !newReview.comment) {
-      alert('Please enter your name and review comment.');
+    if (!newReview.userName) {
+      alert('Please enter your name.');
       return;
     }
-    addReview({
+    await addReview({
       academyId: academy.id,
       ...newReview
     });
-    setNewReview({ userName: '', rating: 5, comment: '' });
+    setNewReview({ userName: '', rating: 5 });
     setIsReviewModalOpen(false);
   };
 
@@ -257,68 +269,70 @@ const GuruProfilePage = () => {
           </div>
 
           {/* Google Map Location */}
-          <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-md space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-extrabold text-gray-900 border-l-4 border-rose-600 pl-3">Google Map Location</h2>
-              {hasGoogleMapAccess && (
-                <a
-                  href={academy.mapUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs font-semibold text-rose-600 hover:underline flex items-center"
-                >
-                  <span>Open Directions</span>
-                  <ExternalLink className="w-3.5 h-3.5 ml-1" />
-                </a>
-              )}
-            </div>
-
-            <p className="text-xs text-gray-600 flex flex-wrap items-center gap-2">
-              <span><strong>Address:</strong> {academy.address || [academy.area, academy.city].filter(Boolean).join(', ')}</span>
-              {pincodeDisplay && (
-                <span className="font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 text-[11px]">
-                  PIN: {pincodeDisplay}
-                </span>
-              )}
-            </p>
-
-            {!hasGoogleMapAccess ? (
-              <div className="w-full h-56 bg-slate-100 rounded-2xl border border-slate-200 p-6 flex flex-col items-center justify-center text-center space-y-3 relative overflow-hidden">
-                <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center shadow-inner">
-                  <MapPin className="w-6 h-6" />
-                </div>
-                <div className="space-y-1 max-w-sm">
-                  <h4 className="font-extrabold text-slate-900 text-sm">Google Map Pin Locked</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Interactive Google Map pin is disabled on {academy.subscriptionPlanName || 'Free Plan'}. Upgrade to <strong>Google Map Location Plan</strong> (₹999/yr) to showcase your exact live map directions.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="w-full h-64 bg-slate-200 rounded-2xl overflow-hidden relative border border-gray-300 shadow-inner flex items-center justify-center">
-                <img
-                  src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&w=1000&q=80"
-                  alt="Map Background"
-                  className="w-full h-full object-cover opacity-60"
-                />
-                <div className="absolute inset-0 bg-slate-900/40" />
-
-                <div className="absolute bg-white p-4 rounded-2xl shadow-2xl border border-gray-200 text-center max-w-xs space-y-2">
-                  <MapPin className="w-8 h-8 text-rose-600 mx-auto animate-bounce" />
-                  <h4 className="font-bold text-gray-900 text-sm">{academy.academyName}</h4>
-                  <p className="text-[11px] text-gray-600 line-clamp-2">{locationDisplay}</p>
+          {(hasGoogleMapAccess || canSeeLockedBanners) && (
+            <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-md space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-extrabold text-gray-900 border-l-4 border-rose-600 pl-3">Google Map Location</h2>
+                {hasGoogleMapAccess && (
                   <a
                     href={academy.mapUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-block bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow"
+                    className="text-xs font-semibold text-rose-600 hover:underline flex items-center"
                   >
-                    View Live Map Pin
+                    <span>Open Directions</span>
+                    <ExternalLink className="w-3.5 h-3.5 ml-1" />
                   </a>
-                </div>
+                )}
               </div>
-            )}
-          </div>
+
+              <p className="text-xs text-gray-600 flex flex-wrap items-center gap-2">
+                <span><strong>Address:</strong> {academy.address || [academy.area, academy.city].filter(Boolean).join(', ')}</span>
+                {pincodeDisplay && (
+                  <span className="font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 text-[11px]">
+                    PIN: {pincodeDisplay}
+                  </span>
+                )}
+              </p>
+
+              {!hasGoogleMapAccess ? (
+                <div className="w-full h-56 bg-slate-100 rounded-2xl border border-slate-200 p-6 flex flex-col items-center justify-center text-center space-y-3 relative overflow-hidden">
+                  <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-2xl flex items-center justify-center shadow-inner">
+                    <MapPin className="w-6 h-6" />
+                  </div>
+                  <div className="space-y-1 max-w-sm">
+                    <h4 className="font-extrabold text-slate-900 text-sm">Google Map Pin Locked</h4>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Interactive Google Map pin is disabled on {academy.subscriptionPlanName || 'Free Plan'}. Upgrade to <strong>{googleMapPlan.name}</strong> (₹{googleMapPlan.price}/yr) to showcase your exact live map directions.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full h-64 bg-slate-200 rounded-2xl overflow-hidden relative border border-gray-300 shadow-inner flex items-center justify-center">
+                  <img
+                    src="https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?auto=format&fit=crop&w=1000&q=80"
+                    alt="Map Background"
+                    className="w-full h-full object-cover opacity-60"
+                  />
+                  <div className="absolute inset-0 bg-slate-900/40" />
+
+                  <div className="absolute bg-white p-4 rounded-2xl shadow-2xl border border-gray-200 text-center max-w-xs space-y-2">
+                    <MapPin className="w-8 h-8 text-rose-600 mx-auto animate-bounce" />
+                    <h4 className="font-bold text-gray-900 text-sm">{academy.academyName}</h4>
+                    <p className="text-[11px] text-gray-600 line-clamp-2">{locationDisplay}</p>
+                    <a
+                      href={academy.mapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow"
+                    >
+                      View Live Map Pin
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-md space-y-6">
             <div className="flex items-center justify-between pb-4 border-b border-gray-100">
@@ -349,8 +363,7 @@ const GuruProfilePage = () => {
                         ))}
                       </div>
                     </div>
-                    <p className="text-xs text-gray-700 leading-relaxed">"{rev.comment}"</p>
-                    <span className="text-[10px] text-gray-400 block">{rev.date}</span>
+                    <span className="text-[10px] text-gray-400 block pt-1">{rev.date}</span>
                   </div>
                 ))
               )}
@@ -396,18 +409,15 @@ const GuruProfilePage = () => {
                     <span>Social Media & Online Profiles</span>
                   </h4>
                   {social.whatsapp && (
-                    <a
-                      href={social.whatsapp.startsWith('http') ? social.whatsapp : `https://wa.me/${social.whatsapp.replace(/\D/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center space-x-3 bg-emerald-50 hover:bg-emerald-100 p-3 rounded-xl border border-emerald-200 text-emerald-900 transition-colors shadow-sm mb-2"
+                    <div
+                      className="flex items-center space-x-3 bg-gray-50 p-3 rounded-xl border border-gray-200 text-gray-500 shadow-sm mb-2 opacity-80"
                     >
-                      <MessageCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                      <MessageCircle className="w-5 h-5 text-gray-400 shrink-0" />
                       <div>
-                        <span className="text-[10px] text-emerald-700 font-bold block">WhatsApp Chat</span>
-                        <span className="font-bold text-xs">Message {academy.teacherName}</span>
+                        <span className="text-[10px] text-gray-400 font-bold block">WhatsApp Chat</span>
+                        <span className="font-bold text-xs">Feature will be released soon.</span>
                       </div>
-                    </a>
+                    </div>
                   )}
 
                   <div className="flex flex-wrap gap-2">
@@ -474,17 +484,19 @@ const GuruProfilePage = () => {
                 </div>
               )
             ) : (
-              <div className="pt-4 border-t border-gray-100">
-                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-center space-y-1.5">
-                  <div className="flex items-center justify-center space-x-1.5 text-slate-700 font-bold text-xs">
-                    <Share2 className="w-4 h-4 text-slate-500 shrink-0" />
-                    <span>Social Media Links Locked</span>
+              canSeeLockedBanners && (
+                <div className="pt-4 border-t border-gray-100">
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl text-center space-y-1.5">
+                    <div className="flex items-center justify-center space-x-1.5 text-slate-700 font-bold text-xs">
+                      <Share2 className="w-4 h-4 text-slate-500 shrink-0" />
+                      <span>Social Media Links Locked</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Social links & WhatsApp chat are locked on <strong>{academy.subscriptionPlanName || 'Free Plan'}</strong>. Upgrade to <strong>Social Media Plan</strong> or <strong>Social Media & Google Map Plan</strong> to unlock.
+                    </p>
                   </div>
-                  <p className="text-[11px] text-slate-500 leading-relaxed">
-                    Social links & WhatsApp chat are locked on <strong>{academy.subscriptionPlanName || 'Free Plan'}</strong>. Upgrade to <strong>Social Media Plan</strong> or <strong>Social Media & Google Map Plan</strong> to unlock.
-                  </p>
                 </div>
-              </div>
+              )
             )}
           </div>
         </div>
@@ -525,16 +537,7 @@ const GuruProfilePage = () => {
                   <option value={1}>1 ★☆☆☆☆ (Poor)</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 uppercase mb-1">Review Comment</label>
-                <textarea
-                  rows={3}
-                  required
-                  value={newReview.comment}
-                  onChange={(e) => setNewReview({ ...newReview, comment: e.target.value })}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-xl text-sm"
-                />
-              </div>
+
               <div className="flex justify-end space-x-2 pt-2">
                 <button
                   type="button"

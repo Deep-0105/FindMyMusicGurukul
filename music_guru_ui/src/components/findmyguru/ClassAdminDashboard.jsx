@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import { useGuru } from '../../context/GuruContext';
+import { guruService } from '../../services/guruService';
 import { getSkillIcon } from '../../utils/skillIcons';
 import { ZipImage, compressImageToZip } from '../../utils/zipImageUtils';
 import GuruNavbar from './GuruNavbar';
 import GuruFooter from './GuruFooter';
 import LoaderSpinner from './LoaderSpinner';
+import MockCheckoutModal from './MockCheckoutModal';
 import {
   Building2,
   CheckCircle2,
@@ -115,12 +117,16 @@ const ClassAdminDashboard = () => {
     updateAcademySubscription,
     checkSocialMediaAccess,
     checkSendInquiryAccess,
-    checkGoogleMapAccess
+    checkGoogleMapAccess,
+    checkLeadContactAccess
   } = useGuru();
   const navigate = useNavigate();
 
   const [activeTab, setActiveTab] = useState('inquiries');
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
+  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState(null);
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false);
+  const [recentTransactions, setRecentTransactions] = useState([]);
 
   const userEmail = (currentUser?.email || '').toLowerCase().trim();
   const userPhone = (currentUser?.phone || '').replace(/\D/g, '');
@@ -128,11 +134,11 @@ const ClassAdminDashboard = () => {
 
   const userAcademy = currentUser
     ? academies.find(
-        (a) =>
-          (userAcadId && (a.id === userAcadId || a.slug === userAcadId)) ||
-          (a.email && userEmail && a.email.toLowerCase().trim() === userEmail) ||
-          (a.phone && userPhone && a.phone.replace(/\D/g, '') === userPhone)
-      ) || academies.find((a) => a.status === 'Pending')
+      (a) =>
+        (userAcadId && (a.id === userAcadId || a.slug === userAcadId)) ||
+        (a.email && userEmail && a.email.toLowerCase().trim() === userEmail) ||
+        (a.phone && userPhone && a.phone.replace(/\D/g, '') === userPhone)
+    ) || academies.find((a) => a.status === 'Pending')
     : null;
 
   const academy = userAcademy || academies.find((a) => a.id === activeAcademyId) || academies.find((a) => a.status === 'Pending') || academies[0] || {};
@@ -141,6 +147,54 @@ const ClassAdminDashboard = () => {
   const hasSocialAccess = checkSocialMediaAccess ? checkSocialMediaAccess(academy) : true;
   const hasInquiryAccess = checkSendInquiryAccess ? checkSendInquiryAccess(academy) : true;
   const hasGoogleMapAccess = checkGoogleMapAccess ? checkGoogleMapAccess(academy) : true;
+  const hasLeadContactAccess = checkLeadContactAccess ? checkLeadContactAccess(academy) : false;
+
+  const googleMapPlan = plans?.find((p) => p.name === 'Google Map Location Plan' || String(p.id) === '3' || String(p.id) === 'plan-3') || { name: 'Google Map Location Plan', price: 999 };
+  const contactPlan = plans?.find((p) => String(p.name).toLowerCase().includes('contacts plan')) || { name: 'View Contacts Plan', price: 599 };
+
+  const isSubscriptionExpired = (expiryDateStr, status) => {
+    if (status && String(status).toLowerCase() === 'expired') return true;
+    if (!expiryDateStr) return false;
+    if (String(expiryDateStr).toLowerCase().includes('lifetime')) return false;
+    try {
+      const expDate = new Date(expiryDateStr);
+      if (isNaN(expDate.getTime())) return false;
+      expDate.setHours(23, 59, 59, 999);
+      return expDate.getTime() < Date.now();
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const getTierFromPlan = (planObj) => {
+    if (!planObj) return 1;
+    const name = String(planObj.name || '').toLowerCase();
+    const idStr = String(planObj.id || '').toLowerCase();
+    if (name.includes('combo') || name.includes('all-in-one') || (name.includes('social') && name.includes('map')) || idStr === '4' || idStr === 'plan-4') return 5;
+    if (name.includes('contacts') || name.includes('contact plan')) return 4;
+    if (name.includes('google map') || name.includes('location') || idStr === '3' || idStr === 'plan-3') return 3;
+    if (name.includes('social') || idStr === '2' || idStr === 'plan-2') return 2;
+    return 1;
+  };
+
+  const currentIsExpired = isSubscriptionExpired(academy?.subscriptionExpiry, academy?.subscriptionStatus);
+  const currentPlanTier = currentIsExpired
+    ? 1
+    : getTierFromPlan({
+      name: academy?.subscriptionPlanName || 'Free Plan',
+      id: academy?.subscriptionPlanId || academy?.subscription_id
+    });
+  const isPaidPlanActive = !currentIsExpired && currentPlanTier > 1 && (academy?.subscriptionStatus || 'Active').toLowerCase() === 'active';
+
+  const handleOpenCheckout = (planObj) => {
+    const targetTier = getTierFromPlan(planObj);
+    if (isPaidPlanActive && targetTier < currentPlanTier) {
+      return; // Cannot select or buy a lower tier plan while current higher plan is active
+    }
+    setSelectedPlanForCheckout(planObj);
+    setIsCheckoutModalOpen(true);
+    setIsUpgradeModalOpen(false);
+  };
 
   const [isBatchDropdownOpen, setIsBatchDropdownOpen] = useState(false);
   const [isLangDropdownOpen, setIsLangDropdownOpen] = useState(false);
@@ -190,6 +244,10 @@ const ClassAdminDashboard = () => {
   const handleProfileImageFileChange = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image upload size must be less than 2 MB");
+        return;
+      }
       setIsSaving(true);
       const compressedDataUrl = await compressImageFile(file, 500, 500, 0.85);
       if (compressedDataUrl) {
@@ -203,6 +261,10 @@ const ClassAdminDashboard = () => {
   const handleCoverImageFileChange = async (e) => {
     const file = e.target.files && e.target.files[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Image upload size must be less than 2 MB");
+        return;
+      }
       setIsSaving(true);
       const compressedDataUrl = await compressImageFile(file, 1200, 500, 0.85);
       if (compressedDataUrl) {
@@ -402,8 +464,8 @@ const ClassAdminDashboard = () => {
     const formattedLanguages = profileForm.languages && profileForm.languages.length > 0
       ? profileForm.languages
       : (typeof profileForm.languagesStr === 'string'
-          ? profileForm.languagesStr.split(',').map((l) => l.trim()).filter(Boolean)
-          : ['English', 'Hindi']);
+        ? profileForm.languagesStr.split(',').map((l) => l.trim()).filter(Boolean)
+        : ['English', 'Hindi']);
 
     const expNum = parseFloat(profileForm.experienceYears);
 
@@ -465,11 +527,10 @@ const ClassAdminDashboard = () => {
             />
             <div>
               <div className="flex items-center space-x-2">
-                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-                  academy.status === 'Approved'
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${academy.status === 'Approved'
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                     : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                }`}>
+                  }`}>
                   Status: {academy.status}
                 </span>
                 <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
@@ -510,21 +571,19 @@ const ClassAdminDashboard = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
         {/* Approval Status Banner for Academy Owner */}
         {academy.status !== 'Approved' && (
-          <div className={`p-6 rounded-2xl border shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all ${
-            academy.status === 'Pending'
+          <div className={`p-6 rounded-2xl border shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-5 transition-all ${academy.status === 'Pending'
               ? 'bg-amber-50/90 border-amber-200 text-amber-950'
               : academy.status === 'Rejected'
-              ? 'bg-rose-50/90 border-rose-200 text-rose-950'
-              : 'bg-slate-100 border-slate-300 text-slate-900'
-          }`}>
+                ? 'bg-rose-50/90 border-rose-200 text-rose-950'
+                : 'bg-slate-100 border-slate-300 text-slate-900'
+            }`}>
             <div className="flex items-start space-x-4">
-              <div className={`p-3 rounded-2xl shrink-0 mt-0.5 shadow-sm ${
-                academy.status === 'Pending'
+              <div className={`p-3 rounded-2xl shrink-0 mt-0.5 shadow-sm ${academy.status === 'Pending'
                   ? 'bg-amber-100 text-amber-700 border border-amber-300'
                   : academy.status === 'Rejected'
-                  ? 'bg-rose-100 text-rose-700 border border-rose-300'
-                  : 'bg-slate-200 text-slate-700 border border-slate-300'
-              }`}>
+                    ? 'bg-rose-100 text-rose-700 border border-rose-300'
+                    : 'bg-slate-200 text-slate-700 border border-slate-300'
+                }`}>
                 {academy.status === 'Pending' ? (
                   <Clock className="w-7 h-7 animate-pulse" />
                 ) : (
@@ -533,13 +592,12 @@ const ClassAdminDashboard = () => {
               </div>
               <div className="space-y-1">
                 <div className="flex items-center space-x-2">
-                  <span className={`text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${
-                    academy.status === 'Pending'
+                  <span className={`text-[11px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${academy.status === 'Pending'
                       ? 'bg-amber-200/80 text-amber-900 border-amber-300'
                       : academy.status === 'Rejected'
-                      ? 'bg-rose-200/80 text-rose-900 border-rose-300'
-                      : 'bg-slate-200 text-slate-800 border-slate-300'
-                  }`}>
+                        ? 'bg-rose-200/80 text-rose-900 border-rose-300'
+                        : 'bg-slate-200 text-slate-800 border-slate-300'
+                    }`}>
                     Status: {academy.status}
                   </span>
                   <span className="text-xs font-semibold opacity-80">
@@ -646,14 +704,12 @@ const ClassAdminDashboard = () => {
                 <span className="px-2 py-0.5 rounded font-bold border bg-purple-50 text-purple-700 border-purple-200 flex items-center gap-1">
                   📩 Inquiries: Included
                 </span>
-                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${
-                  hasSocialAccess ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'
-                }`}>
+                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${hasSocialAccess ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-100 text-gray-500 border-gray-200'
+                  }`}>
                   🌐 Social: {hasSocialAccess ? 'Included' : 'Locked'}
                 </span>
-                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${
-                  hasGoogleMapAccess ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-100 text-gray-500 border-gray-200'
-                }`}>
+                <span className={`px-2 py-0.5 rounded font-bold border flex items-center gap-1 ${hasGoogleMapAccess ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-gray-100 text-gray-500 border-gray-200'
+                  }`}>
                   📍 Map Pin: {hasGoogleMapAccess ? 'Included' : 'Locked'}
                 </span>
               </div>
@@ -661,7 +717,9 @@ const ClassAdminDashboard = () => {
             <div className="pt-2 border-t border-gray-100">
               <span className="inline-flex items-center space-x-1.5 bg-slate-50 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-lg border border-slate-200">
                 <Clock className="w-3 h-3 text-slate-500" />
-                <span>Valid until: {academy.subscriptionExpiry || academy.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}</span>
+                <span>
+                  Valid until: {!isPaidPlanActive ? 'Lifetime Free' : (academy.subscriptionExpiry || academy.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])}
+                </span>
               </span>
             </div>
           </div>
@@ -670,11 +728,10 @@ const ClassAdminDashboard = () => {
         <div className="flex items-center space-x-2 border-b border-gray-200 pb-2 overflow-x-auto">
           <button
             onClick={() => setActiveTab('inquiries')}
-            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${
-              activeTab === 'inquiries'
+            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${activeTab === 'inquiries'
                 ? 'bg-rose-600 text-white shadow-md'
                 : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
-            }`}
+              }`}
           >
             <MessageSquare className="w-4 h-4" />
             <span>Received Inquiries ({academyInquiries.length})</span>
@@ -682,11 +739,10 @@ const ClassAdminDashboard = () => {
 
           <button
             onClick={() => setActiveTab('profile')}
-            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${
-              activeTab === 'profile'
+            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${activeTab === 'profile'
                 ? 'bg-emerald-600 text-white shadow-md'
                 : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
-            }`}
+              }`}
           >
             <Edit3 className="w-4 h-4" />
             <span>Edit Profile</span>
@@ -694,11 +750,10 @@ const ClassAdminDashboard = () => {
 
           <button
             onClick={() => setActiveTab('skills')}
-            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${
-              activeTab === 'skills'
+            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center space-x-2 ${activeTab === 'skills'
                 ? 'bg-purple-600 text-white shadow-md'
                 : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
-            }`}
+              }`}
           >
             <Sliders className="w-4 h-4" />
             <span>Manage Skills & Classes</span>
@@ -728,85 +783,116 @@ const ClassAdminDashboard = () => {
                 <p className="text-sm">No student inquiries received yet.</p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-gray-500 font-bold uppercase tracking-wider border-b border-gray-200">
-                      <th className="p-3">Date</th>
-                      <th className="p-3">Student Name</th>
-                      <th className="p-3">Mobile & Email</th>
-                      <th className="p-3 text-center">Skill Interested</th>
-                      <th className="p-3 text-center">Class Mode</th>
-                      <th className="p-3">Message</th>
-                      <th className="p-3 text-center">Lead Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {academyInquiries.map((inq) => {
-                      const phone = inq.mobile || inq.studentPhone || '';
-                      const email = inq.email || inq.studentEmail || '';
-                      const skill = inq.skill || inq.skillName || 'Music Class';
-                      const mode = inq.mode || inq.preferredSlot || 'Offline';
+              <div className="space-y-4">
+                {!hasLeadContactAccess && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3 text-amber-800">
+                      <Lock className="w-6 h-6 text-amber-600" />
+                      <div>
+                        <h4 className="font-bold text-sm">Unlock Student Contacts</h4>
+                        <p className="text-xs opacity-90">Upgrade to <strong>{contactPlan.name}</strong> (₹{contactPlan.price}/yr) to view full mobile numbers and emails.</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsUpgradeModalOpen(true)}
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-lg whitespace-nowrap transition-colors shadow-sm"
+                    >
+                      Upgrade Plan
+                    </button>
+                  </div>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-gray-500 font-bold uppercase tracking-wider border-b border-gray-200">
+                        <th className="p-3">Date</th>
+                        <th className="p-3">Student Name</th>
+                        <th className="p-3">Mobile & Email</th>
+                        <th className="p-3 text-center">Skill Interested</th>
+                        <th className="p-3 text-center">Class Mode</th>
+                        <th className="p-3">Message</th>
+                        <th className="p-3 text-center">Lead Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {academyInquiries.map((inq) => {
+                        const phone = inq.mobile || inq.studentPhone || '';
+                        const email = inq.email || inq.studentEmail || '';
+                        const skill = inq.skill || inq.skillName || 'Music Class';
+                        const mode = inq.mode || inq.preferredSlot || 'Offline';
 
-                      return (
-                        <tr key={inq.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="p-3 text-gray-400 whitespace-nowrap">
-                            {inq.createdAt ? new Date(inq.createdAt).toLocaleDateString() : 'Recent'}
-                          </td>
-                          <td className="p-3 font-bold text-gray-900">{inq.studentName || 'Student'}</td>
-                          <td className="p-3 space-y-0.5">
-                            {phone ? (
-                              <a href={`tel:${phone}`} className="font-semibold text-rose-600 hover:underline flex items-center gap-1">
-                                📞 {phone}
-                              </a>
-                            ) : (
-                              <span className="text-gray-400 text-xs">📞 Not Provided</span>
-                            )}
-                            {email && <span className="text-gray-500 text-[11px] block">{email}</span>}
-                          </td>
-                          <td className="p-3 text-center">
-                            <span className="bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded border border-rose-100">
-                              {skill}
-                            </span>
-                          </td>
-                          <td className="p-3 text-center whitespace-nowrap">
-                            <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded border ${
-                              mode.toLowerCase().includes('online')
-                                ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            }`}>
-                              {mode}
-                            </span>
-                          </td>
-                          <td className="p-3 text-gray-600 max-w-xs truncate" title={inq.message || ''}>
-                            "{inq.message || 'Interested in joining classes'}"
-                          </td>
-                          <td className="p-3 text-center">
-                            <select
-                              value={inq.status || 'New'}
-                              onChange={(e) => updateInquiryStatus(inq.id, e.target.value)}
-                              className={`text-xs font-bold px-2.5 py-1 rounded-lg border focus:outline-none cursor-pointer ${
-                                inq.status === 'New' || inq.status === 'Pending'
-                                  ? 'bg-rose-100 text-rose-800 border-rose-300'
-                                  : inq.status === 'Contacted'
-                                  ? 'bg-blue-100 text-blue-800 border-blue-300'
-                                  : inq.status === 'Converted'
-                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                                  : 'bg-gray-100 text-gray-700 border-gray-300'
-                              }`}
-                            >
-                              <option value="New">🔴 New Lead</option>
-                              <option value="Pending">🟡 Pending</option>
-                              <option value="Contacted">🔵 Contacted</option>
-                              <option value="Converted">🟢 Enrolled (Converted)</option>
-                              <option value="Closed">⚪ Closed</option>
-                            </select>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                        const maskedPhone = hasLeadContactAccess ? phone : phone ? `${phone.substring(0, 2)}******${phone.substring(phone.length - 2)}` : '';
+                        const maskedEmail = hasLeadContactAccess ? email : email ? `${email.substring(0, 1)}****@${email.split('@')[1] || 'gmail.com'}` : '';
+
+                        return (
+                          <tr key={inq.id} className="hover:bg-slate-50/80 transition-colors">
+                            <td className="p-3 text-gray-400 whitespace-nowrap">
+                              {inq.createdAt ? new Date(inq.createdAt).toLocaleDateString() : 'Recent'}
+                            </td>
+                            <td className="p-3 font-bold text-gray-900">{inq.studentName || 'Student'}</td>
+                            <td className="p-3 space-y-0.5">
+                              {maskedPhone ? (
+                                hasLeadContactAccess ? (
+                                  <a href={`tel:${maskedPhone}`} className="font-semibold text-rose-600 hover:underline flex items-center gap-1">
+                                    📞 {maskedPhone}
+                                  </a>
+                                ) : (
+                                  <span className="font-semibold text-rose-600 flex items-center gap-1">
+                                    📞 {maskedPhone} <Lock className="w-3 h-3 text-amber-500" />
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-gray-400 text-xs">📞 Not Provided</span>
+                              )}
+                              {maskedEmail && (
+                                <span className="text-gray-500 text-[11px] flex items-center gap-1">
+                                  {maskedEmail} {!hasLeadContactAccess && <Lock className="w-3 h-3 text-amber-500" />}
+                                </span>
+                              )}
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className="bg-rose-50 text-rose-700 font-semibold px-2 py-0.5 rounded border border-rose-100">
+                                {skill}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center whitespace-nowrap">
+                              <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded border ${mode.toLowerCase().includes('online')
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}>
+                                {mode}
+                              </span>
+                            </td>
+                            <td className="p-3 text-gray-600 max-w-xs truncate" title={inq.message || ''}>
+                              "{inq.message || 'Interested in joining classes'}"
+                            </td>
+                            <td className="p-3 text-center">
+                              <select
+                                value={inq.status || 'New'}
+                                onChange={(e) => updateInquiryStatus(inq.id, e.target.value)}
+                                className={`text-xs font-bold px-2.5 py-1 rounded-lg border focus:outline-none cursor-pointer ${inq.status === 'New' || inq.status === 'Pending'
+                                    ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                    : inq.status === 'Contacted'
+                                      ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                      : inq.status === 'Converted'
+                                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                        : 'bg-gray-100 text-gray-700 border-gray-300'
+                                  }`}
+                              >
+                                <option value="New">🔴 New Lead</option>
+                                <option value="Pending">🟡 Pending</option>
+                                <option value="Contacted">🔵 Contacted</option>
+                                <option value="Converted">🟢 Enrolled (Converted)</option>
+                                <option value="Closed">⚪ Closed</option>
+                              </select>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
@@ -882,9 +968,8 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, academyName: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${
-                      validationErrors.academyName ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${validationErrors.academyName ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {validationErrors.academyName && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.academyName}</p>
@@ -905,9 +990,8 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, teacherName: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${
-                      validationErrors.teacherName ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${validationErrors.teacherName ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {validationErrors.teacherName && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.teacherName}</p>
@@ -946,9 +1030,8 @@ const ClassAdminDashboard = () => {
                 2. Teaching Modes & Class Formats
               </h4>
 
-              <div className={`space-y-3 bg-rose-50/60 p-5 rounded-2xl border ${
-                validationErrors.teachingMode ? 'border-red-400 ring-2 ring-red-200' : 'border-rose-100'
-              }`}>
+              <div className={`space-y-3 bg-rose-50/60 p-5 rounded-2xl border ${validationErrors.teachingMode ? 'border-red-400 ring-2 ring-red-200' : 'border-rose-100'
+                }`}>
                 <label className="block text-xs font-bold text-gray-800 uppercase tracking-wider">
                   Teaching Modes Offered (Select at least 1) <span className="text-red-500 font-bold ml-0.5">*</span>
                 </label>
@@ -964,11 +1047,10 @@ const ClassAdminDashboard = () => {
                     return (
                       <label
                         key={modeObj.id}
-                        className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
-                          isChecked
+                        className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-xs font-bold cursor-pointer transition-all ${isChecked
                             ? 'bg-rose-600 text-white border-rose-600 shadow-md'
                             : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-                        }`}
+                          }`}
                       >
                         <input
                           type="checkbox"
@@ -998,9 +1080,8 @@ const ClassAdminDashboard = () => {
                       setIsBatchDropdownOpen(!isBatchDropdownOpen);
                       setIsLangDropdownOpen(false);
                     }}
-                    className={`w-full bg-gray-50 hover:bg-white border rounded-xl px-4 py-2.5 text-left text-sm font-semibold flex items-center justify-between transition-all focus:outline-none focus:ring-2 shadow-sm min-h-[44px] ${
-                      validationErrors.batchType ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-purple-500'
-                    }`}
+                    className={`w-full bg-gray-50 hover:bg-white border rounded-xl px-4 py-2.5 text-left text-sm font-semibold flex items-center justify-between transition-all focus:outline-none focus:ring-2 shadow-sm min-h-[44px] ${validationErrors.batchType ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-purple-500'
+                      }`}
                   >
                     <div className="flex flex-wrap gap-1.5 items-center">
                       {(profileForm.batchType || []).length > 0 ? (
@@ -1035,17 +1116,16 @@ const ClassAdminDashboard = () => {
                             <div
                               key={bt}
                               onClick={() => toggleBatchType(bt)}
-                              className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer text-xs font-bold transition-all ${
-                                isChecked
+                              className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl cursor-pointer text-xs font-bold transition-all ${isChecked
                                   ? 'bg-purple-50 text-purple-900 font-extrabold'
                                   : 'text-gray-700 hover:bg-gray-100'
-                              }`}
+                                }`}
                             >
                               <div className="flex items-center space-x-2.5">
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
-                                  onChange={() => {}}
+                                  onChange={() => { }}
                                   className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 border-gray-300"
                                 />
                                 <span>{bt === 'Individual' ? '👤 Individual' : '👥 Group'}</span>
@@ -1125,17 +1205,16 @@ const ClassAdminDashboard = () => {
                                 <div
                                   key={lang}
                                   onClick={() => toggleLanguage(lang)}
-                                  className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer text-xs font-bold transition-all ${
-                                    isChecked
+                                  className={`flex items-center justify-between px-3 py-2 rounded-xl cursor-pointer text-xs font-bold transition-all ${isChecked
                                       ? 'bg-emerald-50 text-emerald-900 font-extrabold'
                                       : 'text-gray-700 hover:bg-gray-100'
-                                  }`}
+                                    }`}
                                 >
                                   <div className="flex items-center space-x-2.5">
                                     <input
                                       type="checkbox"
                                       checked={isChecked}
-                                      onChange={() => {}}
+                                      onChange={() => { }}
                                       className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-gray-300"
                                     />
                                     <span>{lang}</span>
@@ -1187,9 +1266,8 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, phone: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm ${
-                      validationErrors.phone ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm ${validationErrors.phone ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {validationErrors.phone && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.phone}</p>
@@ -1200,10 +1278,9 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp Number</label>
                   <input
                     type="text"
-                    placeholder="+919823044112"
-                    value={profileForm.whatsapp || ''}
-                    onChange={(e) => setProfileForm({ ...profileForm, whatsapp: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-gray-50 border border-gray-300 rounded-xl text-sm"
+                    disabled
+                    value="Feature will be released soon."
+                    className="w-full px-3.5 py-2.5 bg-gray-100 border border-gray-300 rounded-xl text-sm text-gray-500 opacity-60 cursor-not-allowed font-semibold"
                   />
                 </div>
 
@@ -1221,9 +1298,8 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, email: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm ${
-                      validationErrors.email ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm ${validationErrors.email ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {validationErrors.email && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.email}</p>
@@ -1278,9 +1354,8 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, pincode: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${
-                      validationErrors.pincode ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 bg-gray-50 border rounded-xl text-sm focus:bg-white focus:ring-2 ${validationErrors.pincode ? 'border-red-500 focus:ring-red-500' : 'border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {validationErrors.pincode && (
                     <p className="text-red-500 text-xs mt-1 font-semibold">{validationErrors.pincode}</p>
@@ -1307,13 +1382,12 @@ const ClassAdminDashboard = () => {
                         setValidationErrors((prev) => ({ ...prev, mapUrl: undefined }));
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs focus:ring-2 ${
-                      !hasGoogleMapAccess ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-300' : validationErrors.mapUrl ? 'bg-gray-50 border-red-500 focus:ring-red-500' : 'bg-gray-50 border-gray-300 focus:ring-emerald-500'
-                    }`}
+                    className={`w-full px-3.5 py-2.5 border rounded-xl text-xs focus:ring-2 ${!hasGoogleMapAccess ? 'opacity-60 cursor-not-allowed bg-gray-100 border-gray-300' : validationErrors.mapUrl ? 'bg-gray-50 border-red-500 focus:ring-red-500' : 'bg-gray-50 border-gray-300 focus:ring-emerald-500'
+                      }`}
                   />
                   {!hasGoogleMapAccess && (
                     <p className="text-amber-800 text-[11px] mt-1 flex items-center justify-between font-medium">
-                      <span>Upgrade to <strong>Google Map Location Plan</strong> (₹999/yr) to enable live map pins.</span>
+                      <span>Upgrade to <strong>{googleMapPlan.name}</strong> (₹{googleMapPlan.price}/yr) to enable live map pins.</span>
                       <button
                         type="button"
                         onClick={() => setIsUpgradeModalOpen(true)}
@@ -1571,9 +1645,8 @@ const ClassAdminDashboard = () => {
                     placeholder="https://myacademy.com"
                     value={profileForm.socialLinks?.website || ''}
                     onChange={(e) => handleSocialChange('website', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.website ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${validationErrors.website ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                   />
                   {validationErrors.website && (
                     <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.website}</p>
@@ -1584,17 +1657,10 @@ const ClassAdminDashboard = () => {
                   <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">WhatsApp Chat Link</label>
                   <input
                     type="text"
-                    disabled={!hasSocialAccess}
-                    placeholder="https://wa.me/919823044112"
-                    value={profileForm.socialLinks?.whatsapp || ''}
-                    onChange={(e) => handleSocialChange('whatsapp', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.whatsapp ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    disabled
+                    value="Feature will be released soon."
+                    className="w-full px-3.5 py-2 bg-gray-100 border border-gray-300 rounded-xl text-xs text-gray-500 opacity-60 cursor-not-allowed font-semibold"
                   />
-                  {validationErrors.whatsapp && (
-                    <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.whatsapp}</p>
-                  )}
                 </div>
 
                 <div>
@@ -1605,9 +1671,8 @@ const ClassAdminDashboard = () => {
                     placeholder="https://instagram.com/..."
                     value={profileForm.socialLinks?.instagram || ''}
                     onChange={(e) => handleSocialChange('instagram', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.instagram ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${validationErrors.instagram ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                   />
                   {validationErrors.instagram && (
                     <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.instagram}</p>
@@ -1622,9 +1687,8 @@ const ClassAdminDashboard = () => {
                     placeholder="https://youtube.com/..."
                     value={profileForm.socialLinks?.youtube || ''}
                     onChange={(e) => handleSocialChange('youtube', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.youtube ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${validationErrors.youtube ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                   />
                   {validationErrors.youtube && (
                     <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.youtube}</p>
@@ -1639,9 +1703,8 @@ const ClassAdminDashboard = () => {
                     placeholder="https://facebook.com/..."
                     value={profileForm.socialLinks?.facebook || ''}
                     onChange={(e) => handleSocialChange('facebook', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.facebook ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${validationErrors.facebook ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                   />
                   {validationErrors.facebook && (
                     <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.facebook}</p>
@@ -1656,9 +1719,8 @@ const ClassAdminDashboard = () => {
                     placeholder="https://linkedin.com/..."
                     value={profileForm.socialLinks?.linkedin || ''}
                     onChange={(e) => handleSocialChange('linkedin', e.target.value)}
-                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${
-                      validationErrors.linkedin ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
-                    }`}
+                    className={`w-full px-3.5 py-2 bg-gray-50 border rounded-xl text-xs ${validationErrors.linkedin ? 'border-red-500 focus:ring-red-500' : 'border-gray-300'
+                      }`}
                   />
                   {validationErrors.linkedin && (
                     <p className="text-red-500 text-[11px] mt-1 font-semibold">{validationErrors.linkedin}</p>
@@ -1723,11 +1785,10 @@ const ClassAdminDashboard = () => {
                       key={sk.id}
                       type="button"
                       onClick={() => toggleSkill(sk.name)}
-                      className={`p-3 rounded-2xl border text-xs font-bold flex items-center space-x-2 transition-all ${
-                        isChecked
+                      className={`p-3 rounded-2xl border text-xs font-bold flex items-center space-x-2 transition-all ${isChecked
                           ? 'bg-purple-600 text-white border-purple-600 shadow-md'
                           : 'bg-gray-50 text-gray-800 border-gray-200 hover:bg-gray-100'
-                      }`}
+                        }`}
                     >
                       <span>{getSkillIcon(sk)}</span>
                       <span className="truncate">{sk.name}</span>
@@ -1772,7 +1833,7 @@ const ClassAdminDashboard = () => {
       {/* Upgrade Subscription Plan Modal */}
       {isUpgradeModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl space-y-6 relative border border-gray-100 my-8">
+          <div className="bg-white rounded-3xl max-w-[95vw] xl:max-w-7xl w-full p-6 sm:p-8 shadow-2xl space-y-6 relative border border-gray-100 my-8">
             <button
               onClick={() => setIsUpgradeModalOpen(false)}
               className="absolute top-5 right-5 text-gray-400 hover:text-gray-600 p-2 bg-gray-100 hover:bg-gray-200 rounded-full transition-colors"
@@ -1790,217 +1851,103 @@ const ClassAdminDashboard = () => {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-              {/* Plan 1: Free Plan */}
-              {(() => {
-                const freePlanObj = plans.find((p) => p.name === 'Free Plan' || String(p.id) === '1' || String(p.id) === 'plan-1') || {
-                  id: 'plan-1',
-                  name: 'Free Plan',
-                  price: 0
-                };
-                const isCurrent = (academy.subscriptionPlanName || 'Free Plan').toLowerCase().includes('free');
-                return (
-                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all ${
-                    isCurrent ? 'border-gray-400 bg-slate-50 shadow-md' : 'border-gray-200 hover:border-gray-300 bg-white'
-                  }`}>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Tier 1</span>
-                        {isCurrent && (
-                          <span className="bg-gray-200 text-gray-800 text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
-                        )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5 pt-2">
+              {plans
+                .filter((p) => p.is_active !== false && p.isActive !== false)
+                .sort((a, b) => getTierFromPlan(a) - getTierFromPlan(b))
+                .map((planObj) => {
+                  const tier = getTierFromPlan(planObj);
+                  const isCurrent = currentPlanTier === tier && (!isPaidPlanActive ? tier === 1 && !currentIsExpired : isPaidPlanActive);
+                  const isLowerTierDisabled = isPaidPlanActive && tier < currentPlanTier;
+
+                  let theme = {
+                    base: isCurrent ? 'border-gray-400 bg-slate-50 shadow-md' : 'border-gray-200 hover:border-gray-300 bg-white',
+                    tierText: 'text-gray-500',
+                    title: 'text-gray-900',
+                    price: 'text-emerald-700',
+                    btn: isCurrent ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900 text-white shadow'
+                  };
+
+                  if (tier === 2) theme = { ...theme, base: isCurrent ? 'border-indigo-600 bg-indigo-50/30 shadow-md' : 'border-indigo-200 hover:border-indigo-400 bg-white', tierText: 'text-indigo-600', price: 'text-indigo-900', btn: isCurrent ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md' };
+                  else if (tier === 3) theme = { ...theme, base: isCurrent ? 'border-purple-600 bg-purple-50/30 shadow-md' : 'border-purple-200 hover:border-purple-400 bg-white', tierText: 'text-purple-600', price: 'text-purple-900', btn: isCurrent ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white shadow-md' };
+                  else if (tier === 4) theme = { ...theme, base: isCurrent ? 'border-rose-500 bg-rose-50/40 shadow-md' : 'border-gray-200 hover:border-rose-500 bg-white hover:shadow-lg', tierText: 'text-gray-400', price: 'text-rose-900', btn: isCurrent ? 'bg-rose-100 text-rose-700 border border-rose-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700 text-white shadow-md' };
+                  else if (tier === 5) theme = { ...theme, base: isCurrent ? 'border-amber-500 bg-amber-50/40 shadow-md' : 'border-amber-300 hover:border-amber-500 bg-white ring-2 ring-amber-400/20', tierText: 'text-amber-700', price: 'text-amber-900', btn: isCurrent ? 'bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 text-white shadow-md' };
+
+                  const parsedFeatures = (typeof planObj.features === 'string' ? planObj.features.split(',') : (Array.isArray(planObj.features) ? planObj.features : [])).map(f => String(f).trim()).filter(Boolean);
+
+                  return (
+                    <div key={planObj.id} className={`p-5 rounded-2xl border-2 flex flex-col justify-between space-y-4 transition-all relative ${theme.base}`}>
+                      {tier === 5 && (
+                        <span className="absolute -top-3 right-3 bg-gradient-to-r from-amber-500 to-rose-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow uppercase tracking-wider">
+                          ALL-IN-ONE
+                        </span>
+                      )}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${theme.tierText}`}>Tier {tier}</span>
+                          {isCurrent && (
+                            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded ${tier === 5 ? 'bg-amber-600 text-white' : tier === 4 ? 'bg-rose-100 text-rose-700' : tier === 3 ? 'bg-purple-600 text-white' : tier === 2 ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-800'}`}>Current</span>
+                          )}
+                        </div>
+                        <h4 className={`text-lg font-extrabold ${theme.title}`}>{planObj.name}</h4>
+
+                        <div className="flex items-baseline space-x-2">
+                          {planObj.price === 0 || !planObj.price ? (
+                            <span className={`text-2xl font-black ${theme.price}`}>Lifetime Free</span>
+                          ) : (
+                            <div className={`text-2xl font-black ${theme.price}`}>
+                              ₹{planObj.price} <span className="text-xs font-normal text-gray-500">/ year</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-gray-500 leading-relaxed min-h-[3rem]">
+                          {planObj.description || 'Includes basic directory listing.'}
+                        </p>
+
+                        <ul className="space-y-2 text-[11px] text-gray-700 pt-3 border-t border-gray-100">
+                          <li className="flex items-center gap-1.5 font-medium text-gray-600">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span>Directory Listing & Search</span>
+                          </li>
+                          <li className="flex items-center gap-1.5 font-medium text-gray-600">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                            <span>Student Inquiry Forms</span>
+                          </li>
+                          {parsedFeatures.map((feat, i) => (
+                            <li key={i} className="flex items-center gap-1.5 font-bold text-gray-800">
+                              <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${tier === 5 ? 'text-amber-600' : tier === 4 ? 'text-rose-600' : tier === 3 ? 'text-purple-600' : 'text-indigo-600'}`} />
+                              <span>{feat}</span>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
-                      <h4 className="text-xl font-extrabold text-gray-900">Free Plan</h4>
-                      <div className="text-3xl font-black text-gray-900">
-                        ₹0 <span className="text-xs font-normal text-gray-500">/ year</span>
-                      </div>
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        Basic directory listing and student lead inquiry forms.
-                      </p>
-                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-gray-100">
-                        <li className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Directory Listing & Search</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Photo & Media Gallery</span>
-                        </li>
-                        <li className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Instrument Mapping</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-semibold text-emerald-900">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span>Send Inquiry Lead Form</span>
-                        </li>
-                        <li className="flex items-center gap-2 text-gray-400">
-                          <X className="w-4 h-4 text-gray-300 shrink-0" />
-                          <span className="line-through">Social Media Links</span>
-                        </li>
-                        <li className="flex items-center gap-2 text-gray-400">
-                          <X className="w-4 h-4 text-gray-300 shrink-0" />
-                          <span className="line-through">Google Map Location Pin</span>
-                        </li>
-                      </ul>
+
+                      <button
+                        onClick={() => handleOpenCheckout(planObj)}
+                        disabled={isCurrent || isLowerTierDisabled}
+                        className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${theme.btn}`}
+                      >
+                        {isCurrent ? 'Active Plan' : (planObj.price === 0 ? 'Select Free Plan' : 'Activate Plan')}
+                      </button>
                     </div>
-
-                    <button
-                      onClick={async () => {
-                        await updateAcademySubscription(academy.id, freePlanObj.id);
-                        setIsUpgradeModalOpen(false);
-                      }}
-                      disabled={isCurrent}
-                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                        isCurrent
-                          ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                          : 'bg-slate-800 hover:bg-slate-900 text-white shadow'
-                      }`}
-                    >
-                      {isCurrent ? 'Active Plan' : 'Select Free Plan'}
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {/* Plan 2: Social Media Plan */}
-              {(() => {
-                const socialPlanObj = plans.find((p) => p.name === 'Social Media Plan' || String(p.id) === '2' || String(p.id) === 'plan-2') || {
-                  id: 'plan-2',
-                  name: 'Social Media Plan',
-                  price: 499
-                };
-                const isCurrent = (academy.subscriptionPlanName || '').toLowerCase().includes('social media');
-                return (
-                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all relative ${
-                    isCurrent ? 'border-indigo-600 bg-indigo-50/30 shadow-md' : 'border-indigo-200 hover:border-indigo-400 bg-white'
-                  }`}>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Tier 2</span>
-                        {isCurrent && (
-                          <span className="bg-indigo-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
-                        )}
-                      </div>
-                      <h4 className="text-xl font-extrabold text-gray-900">Social Media Plan</h4>
-                      <div className="text-3xl font-black text-indigo-900">
-                        ₹499 <span className="text-xs font-normal text-gray-500">/ year</span>
-                      </div>
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        Free Plan features + WhatsApp, Instagram, YouTube, Facebook, LinkedIn & Website.
-                      </p>
-                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-indigo-100">
-                        <li className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Everything in Free Plan</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
-                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <span>WhatsApp & Phone Chat Link</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
-                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <span>Instagram, YouTube & Facebook</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-semibold text-indigo-900">
-                          <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <span>Website & LinkedIn Links</span>
-                        </li>
-                        <li className="flex items-center gap-2 text-gray-400">
-                          <X className="w-4 h-4 text-gray-300 shrink-0" />
-                          <span className="line-through">Google Map Location Pin</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <button
-                      onClick={async () => {
-                        await updateAcademySubscription(academy.id, socialPlanObj.id);
-                        setIsUpgradeModalOpen(false);
-                      }}
-                      disabled={isCurrent}
-                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                        isCurrent
-                          ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 cursor-not-allowed'
-                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md'
-                      }`}
-                    >
-                      {isCurrent ? 'Active Plan' : 'Activate Social Media Plan'}
-                    </button>
-                  </div>
-                );
-              })()}
-
-              {/* Plan 3: Google Map Location Plan */}
-              {(() => {
-                const mapPlanObj = plans.find((p) => p.name === 'Google Map Location Plan' || String(p.id) === '3' || String(p.id) === 'plan-3') || {
-                  id: 'plan-3',
-                  name: 'Google Map Location Plan',
-                  price: 999
-                };
-                const isCurrent = (academy.subscriptionPlanName || '').toLowerCase().includes('google map');
-                return (
-                  <div className={`p-6 rounded-2xl border-2 flex flex-col justify-between space-y-5 transition-all relative ${
-                    isCurrent ? 'border-purple-600 bg-purple-50/30 shadow-md' : 'border-purple-300 hover:border-purple-500 bg-white ring-2 ring-purple-500/20'
-                  }`}>
-                    <span className="absolute -top-3 right-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded-full shadow">
-                      MOST POPULAR
-                    </span>
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-purple-600 uppercase tracking-wider">Tier 3</span>
-                        {isCurrent && (
-                          <span className="bg-purple-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded">Current Plan</span>
-                        )}
-                      </div>
-                      <h4 className="text-xl font-extrabold text-gray-900">Google Map Location Plan</h4>
-                      <div className="text-3xl font-black text-purple-900">
-                        ₹999 <span className="text-xs font-normal text-gray-500">/ year</span>
-                      </div>
-                      <p className="text-xs text-gray-500 leading-relaxed">
-                        Full suite with interactive Google Map Location pin.
-                      </p>
-                      <ul className="space-y-2 text-xs text-gray-700 pt-3 border-t border-purple-100">
-                        <li className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                          <span>Everything in Social Media Plan</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-bold text-purple-900">
-                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
-                          <span>Interactive Google Map Location Pin</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-bold text-purple-900">
-                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
-                          <span>Live Directions & GPS Link</span>
-                        </li>
-                        <li className="flex items-center gap-2 font-bold text-purple-900">
-                          <CheckCircle2 className="w-4 h-4 text-purple-600 shrink-0" />
-                          <span>Priority Search Ranking</span>
-                        </li>
-                      </ul>
-                    </div>
-
-                    <button
-                      onClick={async () => {
-                        await updateAcademySubscription(academy.id, mapPlanObj.id);
-                        setIsUpgradeModalOpen(false);
-                      }}
-                      disabled={isCurrent}
-                      className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${
-                        isCurrent
-                          ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed'
-                          : 'bg-purple-600 hover:bg-purple-700 text-white shadow-md'
-                      }`}
-                    >
-                      {isCurrent ? 'Active Plan' : 'Activate Google Map Location Plan'}
-                    </button>
-                  </div>
-                );
-              })()}
+                  );
+                })}
             </div>
           </div>
         </div>
       )}
+
+      {/* Mock Checkout Modal Component */}
+      <MockCheckoutModal
+        isOpen={isCheckoutModalOpen}
+        onClose={() => setIsCheckoutModalOpen(false)}
+        plan={selectedPlanForCheckout}
+        academy={academy}
+        onSuccess={(txnRef, activatedPlan) => {
+          setIsCheckoutModalOpen(false);
+        }}
+      />
 
       <GuruFooter />
     </div>

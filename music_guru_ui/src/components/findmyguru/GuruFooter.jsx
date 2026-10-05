@@ -14,7 +14,7 @@ const GuruFooter = () => {
   return (
     <footer className="bg-slate-900 text-slate-300 pt-16 pb-12 border-t border-slate-800">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-10 pb-12 border-b border-slate-800">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-7 gap-10 pb-12 border-b border-slate-800">
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center space-x-2">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shadow-lg">
@@ -68,6 +68,36 @@ const GuruFooter = () => {
                   </Link>
                 </li>
               ))}
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-white font-semibold text-sm uppercase tracking-wider mb-4 border-l-2 border-emerald-500 pl-2">
+              Quick Links
+            </h3>
+            <ul className="space-y-2 text-sm text-slate-400">
+              <li><Link to="/about" onClick={scrollToTop} className="hover:text-emerald-400 transition-colors">About Us</Link></li>
+              <li><Link to="/contact" onClick={scrollToTop} className="hover:text-emerald-400 transition-colors">Contact Us</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-white font-semibold text-sm uppercase tracking-wider mb-4 border-l-2 border-cyan-500 pl-2">
+              Support
+            </h3>
+            <ul className="space-y-2 text-sm text-slate-400">
+              <li><Link to="/support" onClick={scrollToTop} className="hover:text-cyan-400 transition-colors">Help & Support</Link></li>
+              <li><Link to="/faqs" onClick={scrollToTop} className="hover:text-cyan-400 transition-colors">FAQs for Students</Link></li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 className="text-white font-semibold text-sm uppercase tracking-wider mb-4 border-l-2 border-blue-500 pl-2">
+              Legal & Policies
+            </h3>
+            <ul className="space-y-2 text-sm text-slate-400">
+              <li><Link to="/terms-conditions" onClick={scrollToTop} className="hover:text-blue-400 transition-colors">Terms & Conditions</Link></li>
+              <li><Link to="/privacy-policy" onClick={scrollToTop} className="hover:text-blue-400 transition-colors">Privacy Policy</Link></li>
             </ul>
           </div>
         </div>

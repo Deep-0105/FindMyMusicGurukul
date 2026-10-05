@@ -33,6 +33,10 @@ export const guruApi = {
     return await axiosClient.get('/inquiries/stats', { params });
   },
 
+  getReviews: async () => {
+    return await axiosClient.get('/reviews');
+  },
+
   addReview: async (reviewData) => {
     return await axiosClient.post('/reviews', reviewData);
   },
@@ -127,6 +131,34 @@ export const guruApi = {
 
   getAcademyApprovals: async (status = 'all') => {
     return await axiosClient.get('/academies/approvals', { params: { status } });
+  },
+
+  initiateCheckout: async (checkoutData) => {
+    return await axiosClient.post('/checkout/initiate', checkoutData);
+  },
+
+  confirmCheckout: async (confirmData) => {
+    return await axiosClient.post('/checkout/confirm', confirmData);
+  },
+
+  createRazorpayOrder: async (orderData) => {
+    return await axiosClient.post('/payments/create-order', orderData);
+  },
+
+  verifyRazorpayPayment: async (verifyData) => {
+    return await axiosClient.post('/payments/verify', verifyData);
+  },
+
+  getPaymentHistory: async (params = {}) => {
+    return await axiosClient.get('/payments/history', { params });
+  },
+
+  getCurrentSubscription: async (academyId) => {
+    return await axiosClient.get('/subscriptions/current', { params: { academyId } });
+  },
+
+  cancelSubscription: async (academyId) => {
+    return await axiosClient.post('/subscriptions/cancel', { academyId });
   }
 };
 

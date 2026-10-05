@@ -41,7 +41,17 @@ router.patch('/inquiries/:id/status', guruController.updateInquiryStatus);
 router.put('/inquiries/:id', guruController.updateInquiryStatus);
 router.delete('/inquiries/:id', guruController.deleteInquiry);
 
+// Reviews Endpoints
+router.get('/reviews', guruController.getReviews);
+router.post('/reviews', guruController.createReview);
+
 router.get('/home/stats', guruController.getHomeStats);
 router.get('/super-admin/reports', guruController.getSuperAdminReports);
+
+// Mock Payment Checkout & Subscription Lifecycle Endpoints
+router.post('/checkout/initiate', guruController.initiateCheckout);
+router.post('/checkout/confirm', guruController.confirmCheckout);
+router.get('/subscriptions/current', guruController.getCurrentSubscription);
+router.post('/subscriptions/cancel', guruController.cancelSubscription);
 
 module.exports = router;

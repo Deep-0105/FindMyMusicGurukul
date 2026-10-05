@@ -172,15 +172,15 @@ const GuruNavbar = () => {
                   to="/class-admin"
                   onClick={() => setCurrentRole('CLASS_ADMIN')}
                   className={`text-sm font-semibold px-3 py-1.5 rounded-md border flex items-center space-x-1.5 ${
-                    activeAcademy?.status === 'Approved'
+                    (!activeAcademy || activeAcademy.status === 'Approved')
                       ? 'text-emerald-600 hover:text-emerald-700 bg-emerald-50 border-emerald-200'
                       : 'text-amber-700 hover:text-amber-800 bg-amber-50 border-amber-300'
                   }`}
                 >
                   <span>My Academy Dashboard</span>
-                  {activeAcademy?.status !== 'Approved' && (
+                  {activeAcademy && activeAcademy.status !== 'Approved' && (
                     <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded shadow-xs">
-                      {activeAcademy?.status || 'Pending'}
+                      {activeAcademy.status}
                     </span>
                   )}
                 </Link>
