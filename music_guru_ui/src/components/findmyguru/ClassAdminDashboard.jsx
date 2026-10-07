@@ -187,10 +187,6 @@ const ClassAdminDashboard = () => {
   const isPaidPlanActive = !currentIsExpired && currentPlanTier > 1 && (academy?.subscriptionStatus || 'Active').toLowerCase() === 'active';
 
   const handleOpenCheckout = (planObj) => {
-    const targetTier = getTierFromPlan(planObj);
-    if (isPaidPlanActive && targetTier < currentPlanTier) {
-      return; // Cannot select or buy a lower tier plan while current higher plan is active
-    }
     setSelectedPlanForCheckout(planObj);
     setIsCheckoutModalOpen(true);
     setIsUpgradeModalOpen(false);
@@ -526,16 +522,42 @@ const ClassAdminDashboard = () => {
               className="w-16 h-16 rounded-2xl border-2 border-emerald-400 object-cover shadow-lg shrink-0 bg-slate-800"
             />
             <div>
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2 mt-1">
                 <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${academy.status === 'Approved'
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                     : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                   }`}>
                   Status: {academy.status}
                 </span>
-                <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full">
-                  Plan: {academy.subscriptionPlanName || 'Free Listing'} • Valid until {academy.subscriptionExpiry || academy.validUntil || new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
-                </span>
+
+                {!isPaidPlanActive ? (
+                  <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                    Plan: Free Plan • Valid until Lifetime Free
+                  </span>
+                ) : (
+                  <>
+                    {hasSocialAccess && (
+                      <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                        Social Media Plan • Valid until {academy.activePlans?.find(p => p.subscriptionId === 2 || p.subscriptionId === 4)?.expiryDate || academy.subscriptionExpiry}
+                      </span>
+                    )}
+                    {hasGoogleMapAccess && (
+                      <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                        Google Map Plan • Valid until {academy.activePlans?.find(p => p.subscriptionId === 3 || p.subscriptionId === 4)?.expiryDate || academy.subscriptionExpiry}
+                      </span>
+                    )}
+                    {hasLeadContactAccess && (
+                      <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                        View Contacts Plan • Valid until {academy.activePlans?.find(p => p.subscriptionId === 5 || p.subscriptionId === 4)?.expiryDate || academy.subscriptionExpiry}
+                      </span>
+                    )}
+                    {!hasSocialAccess && !hasGoogleMapAccess && !hasLeadContactAccess && (
+                      <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[10px] font-bold px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                        Plan: {academy.subscriptionPlanName || 'Paid Plan'} • Valid until {academy.subscriptionExpiry}
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
               <h1 className="text-2xl font-black text-white mt-1">{academy.academyName}</h1>
               <p className="text-xs text-slate-400">
@@ -1858,20 +1880,28 @@ const ClassAdminDashboard = () => {
                 .map((planObj) => {
                   const tier = getTierFromPlan(planObj);
                   const isCurrent = currentPlanTier === tier && (!isPaidPlanActive ? tier === 1 && !currentIsExpired : isPaidPlanActive);
-                  const isLowerTierDisabled = isPaidPlanActive && tier < currentPlanTier;
+                  
+                  let isIncluded = isCurrent;
+                  if (!isIncluded && isPaidPlanActive) {
+                    if (tier === 1) isIncluded = true;
+                    if (tier === 2 && hasSocialAccess) isIncluded = true;
+                    if (tier === 3 && hasGoogleMapAccess) isIncluded = true;
+                    if (tier === 4 && hasLeadContactAccess) isIncluded = true;
+                    if (tier === 5 && hasSocialAccess && hasGoogleMapAccess && hasLeadContactAccess) isIncluded = true;
+                  }
 
                   let theme = {
                     base: isCurrent ? 'border-gray-400 bg-slate-50 shadow-md' : 'border-gray-200 hover:border-gray-300 bg-white',
                     tierText: 'text-gray-500',
                     title: 'text-gray-900',
                     price: 'text-emerald-700',
-                    btn: isCurrent ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900 text-white shadow'
+                    btn: isIncluded ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-slate-800 hover:bg-slate-900 text-white shadow'
                   };
 
-                  if (tier === 2) theme = { ...theme, base: isCurrent ? 'border-indigo-600 bg-indigo-50/30 shadow-md' : 'border-indigo-200 hover:border-indigo-400 bg-white', tierText: 'text-indigo-600', price: 'text-indigo-900', btn: isCurrent ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md' };
-                  else if (tier === 3) theme = { ...theme, base: isCurrent ? 'border-purple-600 bg-purple-50/30 shadow-md' : 'border-purple-200 hover:border-purple-400 bg-white', tierText: 'text-purple-600', price: 'text-purple-900', btn: isCurrent ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white shadow-md' };
-                  else if (tier === 4) theme = { ...theme, base: isCurrent ? 'border-rose-500 bg-rose-50/40 shadow-md' : 'border-gray-200 hover:border-rose-500 bg-white hover:shadow-lg', tierText: 'text-gray-400', price: 'text-rose-900', btn: isCurrent ? 'bg-rose-100 text-rose-700 border border-rose-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700 text-white shadow-md' };
-                  else if (tier === 5) theme = { ...theme, base: isCurrent ? 'border-amber-500 bg-amber-50/40 shadow-md' : 'border-amber-300 hover:border-amber-500 bg-white ring-2 ring-amber-400/20', tierText: 'text-amber-700', price: 'text-amber-900', btn: isCurrent ? 'bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed' : isLowerTierDisabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 text-white shadow-md' };
+                  if (tier === 2) theme = { ...theme, base: isCurrent ? 'border-indigo-600 bg-indigo-50/30 shadow-md' : 'border-indigo-200 hover:border-indigo-400 bg-white', tierText: 'text-indigo-600', price: 'text-indigo-900', btn: isIncluded ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md' };
+                  else if (tier === 3) theme = { ...theme, base: isCurrent ? 'border-purple-600 bg-purple-50/30 shadow-md' : 'border-purple-200 hover:border-purple-400 bg-white', tierText: 'text-purple-600', price: 'text-purple-900', btn: isIncluded ? 'bg-purple-100 text-purple-700 border border-purple-300 cursor-not-allowed' : 'bg-purple-600 hover:bg-purple-700 text-white shadow-md' };
+                  else if (tier === 4) theme = { ...theme, base: isCurrent ? 'border-rose-500 bg-rose-50/40 shadow-md' : 'border-gray-200 hover:border-rose-500 bg-white hover:shadow-lg', tierText: 'text-gray-400', price: 'text-rose-900', btn: isIncluded ? 'bg-rose-100 text-rose-700 border border-rose-300 cursor-not-allowed' : 'bg-rose-600 hover:bg-rose-700 text-white shadow-md' };
+                  else if (tier === 5) theme = { ...theme, base: isCurrent ? 'border-amber-500 bg-amber-50/40 shadow-md' : 'border-amber-300 hover:border-amber-500 bg-white ring-2 ring-amber-400/20', tierText: 'text-amber-700', price: 'text-amber-900', btn: isIncluded ? 'bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-700 text-white shadow-md' };
 
                   const parsedFeatures = (typeof planObj.features === 'string' ? planObj.features.split(',') : (Array.isArray(planObj.features) ? planObj.features : [])).map(f => String(f).trim()).filter(Boolean);
 
@@ -1925,10 +1955,10 @@ const ClassAdminDashboard = () => {
 
                       <button
                         onClick={() => handleOpenCheckout(planObj)}
-                        disabled={isCurrent || isLowerTierDisabled}
+                        disabled={isIncluded}
                         className={`w-full py-2.5 rounded-xl font-bold text-xs transition-all ${theme.btn}`}
                       >
-                        {isCurrent ? 'Active Plan' : (planObj.price === 0 ? 'Select Free Plan' : 'Activate Plan')}
+                        {isIncluded ? 'Active Plan' : (planObj.price === 0 ? 'Select Free Plan' : 'Activate Plan')}
                       </button>
                     </div>
                   );

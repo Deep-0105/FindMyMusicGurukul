@@ -753,8 +753,8 @@ export const GuruProvider = ({ children }) => {
 
   const checkSocialMediaAccess = (academy) => {
     if (!academy) return false;
-    if (Array.isArray(academy.planFeatures)) {
-      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('social media'))) return true;
+    if (academy.activePlans && academy.activePlans.length > 0) {
+      if (academy.activePlans.some(p => p.subscriptionId === 2 || p.subscriptionId === 4)) return true;
     }
     if (typeof academy.hasSocialMedia === 'boolean') return academy.hasSocialMedia;
     const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
@@ -769,8 +769,8 @@ export const GuruProvider = ({ children }) => {
 
   const checkGoogleMapAccess = (academy) => {
     if (!academy) return false;
-    if (Array.isArray(academy.planFeatures)) {
-      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('google map'))) return true;
+    if (academy.activePlans && academy.activePlans.length > 0) {
+      if (academy.activePlans.some(p => p.subscriptionId === 3 || p.subscriptionId === 4)) return true;
     }
     if (typeof academy.hasGoogleMap === 'boolean') return academy.hasGoogleMap;
     const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
@@ -780,8 +780,8 @@ export const GuruProvider = ({ children }) => {
 
   const checkLeadContactAccess = (academy) => {
     if (!academy) return false;
-    if (Array.isArray(academy.planFeatures)) {
-      if (academy.planFeatures.some((f) => String(f).toLowerCase().includes('student contact') || String(f).toLowerCase().includes('contacts'))) return true;
+    if (academy.activePlans && academy.activePlans.length > 0) {
+      if (academy.activePlans.some(p => p.subscriptionId === 5 || p.subscriptionId === 4)) return true;
     }
     const pName = (academy.subscriptionPlanName || '').toLowerCase().trim();
     if (pName.includes('view contacts') || pName.includes('all-in-one') || pName.includes('premium')) return true;

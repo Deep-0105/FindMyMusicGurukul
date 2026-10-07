@@ -159,17 +159,28 @@ const formatDateStr = (val) => {
 };
 
 const formatAcademyRow = (row) => {
-  const planName = (row.subscriptionPlanName || row.subscription_name || 'Free Plan').trim();
-  const planNameLower = planName.toLowerCase();
-  const isFree = planNameLower.includes('free') || String(row.subscriptionPlanId || row.subscription_id || '').trim() === '1';
+  const planIdStr = String(row.subscriptionPlanId || row.subscription_id || '').trim();
+  let cleanPlanName = (row.subscriptionPlanName || row.subscription_name || 'Free Plan').trim();
+  
+  if (planIdStr === '2') cleanPlanName = 'Social Media Plan';
+  else if (planIdStr === '3') cleanPlanName = 'Google Map Location Plan';
+  else if (planIdStr === '4') cleanPlanName = 'All-in-One Premium Plan';
+  else if (planIdStr === '5') cleanPlanName = 'View Contacts Plan';
 
+  const planNameLower = cleanPlanName.toLowerCase();
+  const isFree = planIdStr === '1' || planIdStr === '';
+
+  let expDateRaw = formatDateStr(row.subscriptionExpiry || row.subscription_expiry || row.expiry_date);
+  if (expDateRaw && expDateRaw.startsWith('2099') && !isFree) {
+    expDateRaw = null;
+  }
+  
   const expDate = isFree
     ? 'Lifetime Free'
-    : (formatDateStr(row.subscriptionExpiry || row.subscription_expiry || row.expiry_date)
-       || (row.created_at ? formatDateStr(new Date(new Date(row.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]));
+    : (expDateRaw || (row.created_at ? formatDateStr(new Date(new Date(row.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]));
 
-  const hasSocialMedia = typeof row.has_social_media === 'boolean' ? row.has_social_media : (row.has_social_media === 1 || row.hasSocialMedia === 1 || planNameLower.includes('social media') || planNameLower.includes('google map'));
-  const hasGoogleMap = typeof row.has_google_map === 'boolean' ? row.has_google_map : (row.has_google_map === 1 || row.hasGoogleMap === 1 || planNameLower.includes('google map') || planNameLower.includes('diamond'));
+  const hasSocialMedia = row.hasSocialMedia === true || row.hasSocialMedia === 1 || row.has_social_media === true || row.has_social_media === 1 || planNameLower.includes('social media') || planNameLower.includes('google map');
+  const hasGoogleMap = row.hasGoogleMap === true || row.hasGoogleMap === 1 || row.has_google_map === true || row.has_google_map === 1 || planNameLower.includes('google map') || planNameLower.includes('diamond');
   const hasSendInquiry = true; // Send Inquiry included in Free Plan and all subscription tiers
 
   return {
@@ -177,7 +188,7 @@ const formatAcademyRow = (row) => {
     pincode: row.pincode || row.pin_code || row.areaPincode || '',
     skills: row.skillsList ? row.skillsList.split(', ') : ['Guitar', 'Western Music', 'Vocal'],
     subscriptionPlanId: row.subscriptionPlanId || row.subscription_id || 'plan-1',
-    subscriptionPlanName: planName,
+    subscriptionPlanName: cleanPlanName,
     subscriptionStatus: row.subscriptionStatus || row.subscription_status || 'Active',
     subscriptionStart: formatDateStr(row.subscriptionStart || row.subscription_start || row.start_date) || (row.created_at ? formatDateStr(row.created_at) : new Date().toISOString().split('T')[0]),
     subscriptionExpiry: expDate,
@@ -210,7 +221,7 @@ exports.getAcademies = async (req, res) => {
 
     let queryText = `
       SELECT 
-        a.id, a.slug, a.academy_name AS academyName, a.teacher_name AS teacherName,
+        a.id, a.slug, a.user_id AS userId, a.academy_name AS academyName, a.teacher_name AS teacherName,
         a.email, a.phone, c.name AS city, ar.name AS area, ar.pincode AS areaPincode, a.experience_years AS experienceYears,
         a.rating, a.status, a.fees_per_month AS feesPerMonth, a.address, a.bio AS about,
         a.teaching_modes AS teachingModesRaw, a.batch_types AS batchTypesRaw, a.languages AS languagesRaw,
@@ -218,8 +229,8 @@ exports.getAcademies = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
-        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
-        COALESCE(a.subscription_expiry, us.expiry_date) AS subscriptionExpiry, COALESCE(a.subscription_start, us.start_date) AS subscriptionStart, COALESCE(a.subscription_status, us.status) AS subscriptionStatus,
+        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        a.subscription_expiry AS subscriptionExpiry, a.subscription_start AS subscriptionStart, a.subscription_status AS subscriptionStatus,
         a.has_social_media AS hasSocialMedia, a.has_google_map AS hasGoogleMap,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
@@ -232,10 +243,9 @@ exports.getAcademies = async (req, res) => {
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
       LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
-      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
       LEFT JOIN subscriptions sub ON (
-        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
-        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+        COALESCE(a.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
       )
       WHERE a.deleted = 0
     `;
@@ -266,6 +276,31 @@ exports.getAcademies = async (req, res) => {
     if (result && result.recordset) {
       const formattedAcademies = result.recordset.map(formatAcademyRow);
 
+      const userIds = formattedAcademies.map(a => a.userId).filter(Boolean);
+      let subscriptionsMap = {};
+      
+      if (userIds.length > 0) {
+        const subsQuery = await executeQuery(`
+          SELECT user_id, subscription_id, expiry_date 
+          FROM user_subscriptions 
+          WHERE status = 'Active' AND expiry_date > GETDATE() AND user_id IN (${userIds.map(id => `'${id}'`).join(',')})
+        `);
+        
+        if (subsQuery && subsQuery.recordset) {
+          subsQuery.recordset.forEach(sub => {
+            if (!subscriptionsMap[sub.user_id]) subscriptionsMap[sub.user_id] = [];
+            subscriptionsMap[sub.user_id].push({
+              subscriptionId: sub.subscription_id,
+              expiryDate: formatDateStr(sub.expiry_date)
+            });
+          });
+        }
+      }
+
+      formattedAcademies.forEach(a => {
+        a.activePlans = a.userId && subscriptionsMap[a.userId] ? subscriptionsMap[a.userId] : [];
+      });
+
       if (skill) {
         const filtered = formattedAcademies.filter((a) =>
           a.skills.some((s) => s.toLowerCase().includes(skill.toLowerCase()))
@@ -288,13 +323,13 @@ exports.getAcademyApprovals = async (req, res) => {
     const { status } = req.query;
     let queryText = `
       SELECT 
-        a.id, a.slug, a.academy_name AS academyName, a.teacher_name AS teacherName,
+        a.id, a.slug, a.user_id AS userId, a.academy_name AS academyName, a.teacher_name AS teacherName,
         a.email, a.phone, c.name AS city, ar.name AS area, a.experience_years AS experienceYears,
         a.rating, a.status, a.fees_per_month AS feesPerMonth, a.address, a.bio AS about,
         a.teaching_modes AS teachingModesRaw, a.batch_types AS batchTypesRaw, a.languages AS languagesRaw,
         a.profile_image AS profileImage, a.cover_image AS coverImage, a.map_url AS mapUrl,
-        a.created_at AS createdAt, sub.name AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
-        us.expiry_date AS subscriptionExpiry, us.start_date AS subscriptionStart, us.status AS subscriptionStatus,
+        a.created_at AS createdAt, COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        a.subscription_expiry AS subscriptionExpiry, a.subscription_start AS subscriptionStart, a.subscription_status AS subscriptionStatus,
         (
           SELECT STRING_AGG(s.name, ', ') 
           FROM academy_skills ask 
@@ -305,10 +340,9 @@ exports.getAcademyApprovals = async (req, res) => {
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
       LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
-      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
       LEFT JOIN subscriptions sub ON (
-        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
-        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+        COALESCE(a.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
       )
       WHERE a.deleted = 0
     `;
@@ -325,6 +359,32 @@ exports.getAcademyApprovals = async (req, res) => {
 
     if (result && result.recordset) {
       const formatted = result.recordset.map(formatAcademyRow);
+
+      const userIds = formatted.map(a => a.userId).filter(Boolean);
+      let subscriptionsMap = {};
+      
+      if (userIds.length > 0) {
+        const subsQuery = await executeQuery(`
+          SELECT user_id, subscription_id, expiry_date 
+          FROM user_subscriptions 
+          WHERE status = 'Active' AND expiry_date > GETDATE() AND user_id IN (${userIds.map(id => `'${id}'`).join(',')})
+        `);
+        
+        if (subsQuery && subsQuery.recordset) {
+          subsQuery.recordset.forEach(sub => {
+            if (!subscriptionsMap[sub.user_id]) subscriptionsMap[sub.user_id] = [];
+            subscriptionsMap[sub.user_id].push({
+              subscriptionId: sub.subscription_id,
+              expiryDate: formatDateStr(sub.expiry_date)
+            });
+          });
+        }
+      }
+
+      formatted.forEach(a => {
+        a.activePlans = a.userId && subscriptionsMap[a.userId] ? subscriptionsMap[a.userId] : [];
+      });
+
       return res.json({ success: true, count: formatted.length, data: formatted });
     }
 
@@ -423,7 +483,7 @@ exports.getAcademyBySlug = async (req, res) => {
 
     const result = await executeQuery(`
       SELECT 
-        a.id, a.slug, a.academy_name AS academyName, a.teacher_name AS teacherName,
+        a.id, a.slug, a.user_id AS userId, a.academy_name AS academyName, a.teacher_name AS teacherName,
         a.email, a.phone, c.name AS city, ar.name AS area, a.experience_years AS experienceYears,
         a.rating, a.status, a.fees_per_month AS feesPerMonth, a.address, a.bio AS about,
         a.teaching_modes AS teachingModesRaw, a.batch_types AS batchTypesRaw, a.languages AS languagesRaw,
@@ -431,8 +491,8 @@ exports.getAcademyBySlug = async (req, res) => {
         a.whatsapp, a.social_website AS socialWebsite, a.social_instagram AS socialInstagram,
         a.social_youtube AS socialYoutube, a.social_facebook AS socialFacebook,
         a.social_linkedin AS socialLinkedin, a.profile_views AS profileViews,
-        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS subscriptionPlanId,
-        COALESCE(a.subscription_expiry, us.expiry_date) AS subscriptionExpiry, COALESCE(a.subscription_start, us.start_date) AS subscriptionStart, COALESCE(a.subscription_status, us.status) AS subscriptionStatus,
+        COALESCE(a.subscription_plan_name, sub.name) AS subscriptionPlanName, COALESCE(a.subscription_id, u.subscription_id) AS subscriptionPlanId,
+        a.subscription_expiry AS subscriptionExpiry, a.subscription_start AS subscriptionStart, a.subscription_status AS subscriptionStatus,
         a.has_social_media AS hasSocialMedia, a.has_google_map AS hasGoogleMap,
         (SELECT COUNT(*) FROM reviews r WHERE (r.academy_id = a.id OR CAST(r.academy_id AS VARCHAR(100)) = CAST(a.id AS VARCHAR(100))) AND r.deleted = 0) AS reviewCount,
         (
@@ -445,10 +505,9 @@ exports.getAcademyBySlug = async (req, res) => {
       LEFT JOIN cities c ON (a.city_id = c.id OR CAST(a.city_id AS VARCHAR(100)) = CAST(c.id AS VARCHAR(100)))
       LEFT JOIN areas ar ON (a.area_id = ar.id OR CAST(a.area_id AS VARCHAR(100)) = CAST(ar.id AS VARCHAR(100)))
       LEFT JOIN users u ON (a.user_id = u.id OR CAST(a.user_id AS VARCHAR(100)) = CAST(u.id AS VARCHAR(100)) OR LOWER(a.email) = LOWER(u.email))
-      LEFT JOIN user_subscriptions us ON (u.id = us.user_id OR CAST(u.id AS VARCHAR(100)) = CAST(us.user_id AS VARCHAR(100)))
       LEFT JOIN subscriptions sub ON (
-        COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) = sub.id 
-        OR CAST(COALESCE(a.subscription_id, us.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
+        COALESCE(a.subscription_id, u.subscription_id) = sub.id 
+        OR CAST(COALESCE(a.subscription_id, u.subscription_id) AS VARCHAR(100)) = CAST(sub.id AS VARCHAR(100))
       )
       WHERE a.deleted = 0 AND (a.slug = @slug OR a.id = TRY_CAST(@slug AS INT) OR CAST(a.id AS VARCHAR(100)) = @slug)
     `, [
@@ -457,6 +516,28 @@ exports.getAcademyBySlug = async (req, res) => {
 
     if (result && result.recordset && result.recordset.length > 0) {
       const acad = formatAcademyRow(result.recordset[0]);
+      
+      if (acad.userId) {
+        const subsQuery = await executeQuery(`
+          SELECT subscription_id, expiry_date 
+          FROM user_subscriptions 
+          WHERE status = 'Active' AND expiry_date > GETDATE() AND user_id = @userId
+        `, [
+          { name: 'userId', type: sql.VarChar, value: String(acad.userId) }
+        ]);
+        
+        if (subsQuery && subsQuery.recordset) {
+          acad.activePlans = subsQuery.recordset.map(sub => ({
+            subscriptionId: sub.subscription_id,
+            expiryDate: formatDateStr(sub.expiry_date)
+          }));
+        } else {
+          acad.activePlans = [];
+        }
+      } else {
+        acad.activePlans = [];
+      }
+
       return res.json({
         success: true,
         data: acad

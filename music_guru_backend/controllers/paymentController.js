@@ -335,13 +335,40 @@ exports.verifyPayment = async (req, res) => {
       { name: 'internalId', type: sql.VarChar, value: String(internalOrderId || '') }
     ]);
 
-    // Determine plan metadata
-    const planNames = { 1: 'Free Plan', 2: 'Social Media Plan', 3: 'Google Map Location Plan', 4: 'Social Media & Google Map Plan' };
-    const pName = planNames[numericSubId] || 'Free Plan';
-    const hasSocial = (numericSubId === 2 || numericSubId === 4);
-    const hasMap = (numericSubId === 3 || numericSubId === 4);
+    let finalSubId = numericSubId;
+    if (targetAcadId) {
+      const acadCheckRes = await executeQuery(`
+        SELECT has_social_media, has_google_map FROM academies WHERE id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId
+      `, [{ name: 'acadId', type: sql.VarChar, value: String(targetAcadId) }]);
+      
+      const currentAcad = acadCheckRes?.recordset?.[0] || {};
+      const currentHasSocial = currentAcad.has_social_media === 1 || currentAcad.has_social_media === true;
+      const currentHasMap = currentAcad.has_google_map === 1 || currentAcad.has_google_map === true;
+      
+      const incomingHasSocial = (numericSubId === 2 || numericSubId === 4);
+      const incomingHasMap = (numericSubId === 3 || numericSubId === 4);
+      const incomingHasContact = (numericSubId === 5 || numericSubId === 4);
+      
+      const willHaveSocial = currentHasSocial || incomingHasSocial;
+      const willHaveMap = currentHasMap || incomingHasMap;
+      const willHaveContact = currentAcad.contact_plan_expiry || incomingHasContact; // We don't have a has_contact column, so just checking incoming
 
-    const isFree = numericSubId === 1 || getPlanTier(numericSubId, pName) === 1;
+      // Upgrade to All-in-One if they buy Social/Map/Contact and have the others
+      if (willHaveSocial && willHaveMap) {
+        // Technically "All-in-One" used to be just Social + Map. Now it includes Contacts.
+        // We'll upgrade them to 4 if they have at least Social and Map.
+        finalSubId = 4;
+      }
+    }
+
+    // Determine plan metadata
+    const planNames = { 1: 'Free Plan', 2: 'Social Media Plan', 3: 'Google Map Location Plan', 4: 'All-in-One Premium Plan', 5: 'View Contacts Plan' };
+    const pName = planNames[finalSubId] || planNames[numericSubId] || 'Free Plan';
+    const hasSocial = (finalSubId === 2 || finalSubId === 4);
+    const hasMap = (finalSubId === 3 || finalSubId === 4);
+    const hasContact = (finalSubId === 5 || finalSubId === 4);
+
+    const isFree = finalSubId === 1 || getPlanTier(finalSubId, pName) === 1;
     const startDate = new Date();
     const expiryDate = isFree ? new Date('2099-12-31') : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
     const startStr = startDate.toISOString().split('T')[0];
@@ -353,18 +380,14 @@ exports.verifyPayment = async (req, res) => {
         UPDATE academies
         SET
           subscription_id = @subId,
-          subscription_plan_name = CASE 
-             WHEN subscription_plan_name = 'Free Plan' OR subscription_plan_name IS NULL THEN @planName
-             WHEN subscription_plan_name LIKE '%' + @planName + '%' THEN subscription_plan_name
-             ELSE subscription_plan_name + ' & ' + @planName
-          END,
+          subscription_plan_name = @planName,
           subscription_status = 'Active',
           subscription_start = CASE 
              WHEN subscription_start IS NULL THEN @startDate 
              ELSE subscription_start 
           END,
           subscription_expiry = CASE 
-             WHEN subscription_expiry IS NOT NULL AND subscription_expiry > @expiryDate THEN subscription_expiry 
+             WHEN subscription_expiry IS NOT NULL AND subscription_expiry > @expiryDate AND subscription_expiry < '2099-01-01' THEN subscription_expiry 
              ELSE @expiryDate 
           END,
           has_social_media = CASE WHEN @hasSocial = 1 THEN 1 ELSE has_social_media END,
@@ -373,7 +396,7 @@ exports.verifyPayment = async (req, res) => {
         WHERE id = TRY_CAST(@acadId AS INT) OR CAST(id AS VARCHAR(100)) = @acadId OR slug = @acadId
       `, [
         { name: 'acadId', type: sql.VarChar, value: String(targetAcadId) },
-        { name: 'subId', type: sql.Int, value: numericSubId },
+        { name: 'subId', type: sql.Int, value: finalSubId },
         { name: 'planName', type: sql.VarChar, value: pName },
         { name: 'startDate', type: sql.VarChar, value: startStr },
         { name: 'expiryDate', type: sql.VarChar, value: expiryStr },
@@ -390,37 +413,40 @@ exports.verifyPayment = async (req, res) => {
         WHERE id = TRY_CAST(@uId AS INT) OR CAST(id AS VARCHAR(100)) = @uId
       `, [
         { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
-        { name: 'subId', type: sql.Int, value: numericSubId }
+        { name: 'subId', type: sql.Int, value: finalSubId }
       ]);
 
-      // 3. UPSERT USER_SUBSCRIPTIONS TABLE
+      // 3. UPSERT USER_SUBSCRIPTIONS TABLE for the specifically purchased plan
       const subCheck = await executeQuery(`
-        SELECT id FROM user_subscriptions WHERE user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId
-      `, [{ name: 'uId', type: sql.VarChar, value: String(resolvedUserId) }]);
+        SELECT id FROM user_subscriptions 
+        WHERE (user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId)
+          AND subscription_id = @actualSubId
+      `, [
+        { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
+        { name: 'actualSubId', type: sql.Int, value: numericSubId }
+      ]);
 
       if (subCheck?.recordset?.length > 0) {
         await executeQuery(`
           UPDATE user_subscriptions
-          SET subscription_id = @subId,
-              start_date = @startDate,
-              expiry_date = @expiryDate,
+          SET start_date = CASE WHEN expiry_date IS NOT NULL AND expiry_date > GETDATE() THEN start_date ELSE @startDate END,
+              expiry_date = CASE WHEN expiry_date IS NOT NULL AND expiry_date > @expiryDate AND expiry_date < '2099-01-01' THEN expiry_date ELSE @expiryDate END,
               status = 'Active',
               payment_status = 'Paid',
               updated_at = GETDATE()
-          WHERE user_id = TRY_CAST(@uId AS INT) OR CAST(user_id AS VARCHAR(100)) = @uId
+          WHERE id = @recordId
         `, [
-          { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
-          { name: 'subId', type: sql.Int, value: numericSubId },
+          { name: 'recordId', type: sql.Int, value: subCheck.recordset[0].id },
           { name: 'startDate', type: sql.VarChar, value: startStr },
           { name: 'expiryDate', type: sql.VarChar, value: expiryStr }
         ]);
       } else {
         await executeQuery(`
           INSERT INTO user_subscriptions (user_id, subscription_id, start_date, expiry_date, status, payment_status, created_at, updated_at)
-          VALUES (TRY_CAST(@uId AS INT), @subId, @startDate, @expiryDate, 'Active', 'Paid', GETDATE(), GETDATE())
+          VALUES (TRY_CAST(@uId AS INT), @actualSubId, @startDate, @expiryDate, 'Active', 'Paid', GETDATE(), GETDATE())
         `, [
           { name: 'uId', type: sql.VarChar, value: String(resolvedUserId) },
-          { name: 'subId', type: sql.Int, value: numericSubId },
+          { name: 'actualSubId', type: sql.Int, value: numericSubId },
           { name: 'startDate', type: sql.VarChar, value: startStr },
           { name: 'expiryDate', type: sql.VarChar, value: expiryStr }
         ]);
@@ -435,7 +461,7 @@ exports.verifyPayment = async (req, res) => {
     `, [
       { name: 'uId', type: sql.VarChar, value: resolvedUserId ? String(resolvedUserId) : null },
       { name: 'acadId', type: sql.VarChar, value: targetAcadId ? String(targetAcadId) : null },
-      { name: 'subId', type: sql.Int, value: numericSubId },
+      { name: 'subId', type: sql.Int, value: finalSubId },
       { name: 'txnRef', type: sql.VarChar, value: String(paymentRef) }
     ]);
 
@@ -445,7 +471,7 @@ exports.verifyPayment = async (req, res) => {
       paymentStatus: 'SUCCESS',
       transactionRef: paymentRef,
       subscription: {
-        planId: numericSubId,
+        planId: finalSubId,
         planName: pName,
         status: 'Active',
         startDate: startStr,
